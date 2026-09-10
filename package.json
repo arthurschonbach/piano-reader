@@ -1,0 +1,27 @@
+{
+  "name": "piano-reader",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "icons": "node scripts/gen-icons.mjs",
+    "test": "tsx tests/smoke.ts"
+  },
+  "dependencies": {
+    "fflate": "^0.8.2",
+    "vexflow": "^4.2.5"
+  },
+  "devDependencies": {
+    "@napi-rs/canvas": "^1.0.9",
+    "@types/node": "^22.20.2",
+    "linkedom": "^0.18.12",
+    "tsx": "^4.20.6",
+    "typescript": "~5.9.3",
+    "vite": "^7.1.11",
+    "vite-plugin-pwa": "^1.0.4"
+  }
+}
