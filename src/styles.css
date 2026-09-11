@@ -545,15 +545,69 @@ select {
   color: #fff;
 }
 
+.presets.amb {
+  margin-top: -6px;
+}
+
+.gen-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.sec-title {
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .gen-global {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 14px;
   padding: 12px 16px;
+}
+
+.tempo-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tempo-row input[type='range'] {
+  width: 100%;
+  min-width: 0;
+  accent-color: var(--blue);
+}
+
+.tempo-row .bpm {
+  font-variant-numeric: tabular-nums;
+  min-width: 7ch;
+  font-weight: 600;
+}
+
+.seed-row {
+  display: flex;
+  gap: 8px;
+}
+
+.seed-row input {
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  padding: 0 8px;
+  color: var(--ink);
+  width: 100%;
+  min-width: 0;
 }
 
 .gl {

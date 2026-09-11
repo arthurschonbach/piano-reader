@@ -1,6 +1,6 @@
 import { HAND } from './engraver';
 import { makeDemoScore } from './demo';
-import { keyOf, makeGeneratorScore, type GenConfig, type GenScore } from './generator';
+import { Generator, keyOf, makeGeneratorScore, type Accompaniment, type Contour, type GenConfig, type GenScore, type Harmony, type Tri } from './generator';
 import { parseMusicXml } from './musicxml';
 import type { Score } from './model';
 
@@ -9,6 +9,7 @@ export const MIDI_HI = 84;
 
 const WHITE_PC = new Set([0, 2, 4, 5, 7, 9, 11]);
 const NOTE_NAMES = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
+const FR_ROOTS = ['Do', 'Do♯', 'Ré', 'Ré♯', 'Mi', 'Fa', 'Fa♯', 'Sol', 'Sol♯', 'La', 'La♯', 'Si'];
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, html?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -60,7 +61,6 @@ export function renderHome(root: HTMLElement, cb: HomeCallbacks): void {
   });
   demoCard.addEventListener('click', () => cb.onScore(makeDemoScore()));
   genCard.addEventListener('click', () => cb.onGenerate());
-  genCard.addEventListener('click', () => cb.onGenerate());
 
   const onDragOver = (ev: DragEvent) => {
     ev.preventDefault();
@@ -87,7 +87,14 @@ export function renderGenerator(root: HTMLElement, onPlay: (g: GenScore) => void
     lh: { enabled: true, notes: [48, 50, 52, 53, 55], level: 1, long: 2, chords: 3 },
     time: [4, 4],
     bpm: 80,
-    seed: Math.floor(Math.random() * 1e9)
+    seed: Math.floor(Math.random() * 1e9),
+    key: 'auto',
+    contour: 'wave',
+    accompaniment: 'alberti',
+    harmony: 'classic',
+    motif: 1,
+    syncop: 0,
+    rests: 1
   };
 
   const wrap = el('div', 'gen');
@@ -97,6 +104,39 @@ export function renderGenerator(root: HTMLElement, onPlay: (g: GenScore) => void
   head.append(back, el('h1', undefined, 'Générateur infini'));
 
   const err = el('div', 'error');
+  const syncUI: (() => void)[] = [];
+  const keyLbl = el('span', 'gl key-lbl');
+  const refreshKey = () => (keyLbl.textContent = `Tonalité : ${keyOf(cfg)}`);
+
+  const mkSelect = (parent: HTMLElement, lbl: string, options: [string, string][], get: () => string, set: (v: string) => void): HTMLSelectElement => {
+    const f = el('label', 'fld');
+    f.append(el('span', undefined, lbl));
+    const sel = el('select') as HTMLSelectElement;
+    for (const [v, oLbl] of options) {
+      const o = el('option');
+      o.value = v;
+      o.textContent = oLbl;
+      sel.append(o);
+    }
+    sel.addEventListener('change', () => {
+      set(sel.value);
+      refreshKey();
+    });
+    f.append(sel);
+    syncUI.push(() => (sel.value = get()));
+    sel.value = get();
+    parent.append(f);
+    return sel;
+  };
+
+  const keyOptions: [string, string][] = [['auto', 'Auto (déduite)']];
+  for (let r = 0; r < 12; r++) {
+    keyOptions.push([`${r}M`, `${FR_ROOTS[r]} majeur`]);
+    keyOptions.push([`${r}m`, `${FR_ROOTS[r]} mineur`]);
+  }
+  const keyStr = (k: GenConfig['key']): string => (k && k !== 'auto' ? `${k.root}${k.minor ? 'm' : 'M'}` : 'auto');
+  const parseKey = (v: string): GenConfig['key'] =>
+    v === 'auto' ? 'auto' : { root: parseInt(v.slice(0, -1), 10), minor: v.slice(-1) === 'm' };
 
   const handCard = (h: 0 | 1): HTMLElement => {
     const hand = h === 0 ? cfg.rh : cfg.lh;
@@ -113,24 +153,12 @@ export function renderGenerator(root: HTMLElement, onPlay: (g: GenScore) => void
     card.append(top);
 
     const flds = el('div', 'flds');
-    const mkField = (lbl: string, options: [string, string][], initial: string, onchange: (v: string) => void) => {
-      const f = el('label', 'fld');
-      f.append(el('span', undefined, lbl));
-      const sel = el('select') as HTMLSelectElement;
-      for (const [v, oLbl] of options) {
-        const o = el('option');
-        o.value = v;
-        o.textContent = oLbl;
-        if (v === initial) o.selected = true;
-        sel.append(o);
-      }
-      sel.addEventListener('change', () => onchange(sel.value));
-      f.append(sel);
-      flds.append(f);
-    };
-    mkField('Rythme', [['1', 'Noires'], ['2', '+ Croches'], ['3', '+ Doubles'], ['4', 'Dense']], String(hand.level), (v) => (hand.level = parseInt(v)));
-    mkField('Notes longues', [['0', 'Courtes'], ['2', '+ Blanches'], ['4', 'Blanches et rondes']], String(hand.long ?? 2), (v) => (hand.long = parseInt(v) as 0 | 2 | 4));
-    mkField('Accords', [['0', 'Aucun'], ['3', 'Triades'], ['4', 'Triades + 7ᵉ']], String(hand.chords ?? 0), (v) => (hand.chords = parseInt(v) as 0 | 3 | 4));
+    mkSelect(flds, 'Rythme', [['1', 'Noires'], ['2', '+ Croches'], ['3', '+ Doubles'], ['4', 'Dense']], () => String(hand.level), (v) => (hand.level = parseInt(v)));
+    mkSelect(flds, 'Notes longues', [['0', 'Courtes'], ['2', '+ Blanches'], ['4', 'Blanches et rondes']], () => String(hand.long ?? 2), (v) => (hand.long = parseInt(v) as 0 | 2 | 4));
+    mkSelect(flds, 'Accords', [['0', 'Aucun'], ['3', 'Triades'], ['4', 'Triades + 7ᵉ']], () => String(hand.chords ?? 0), (v) => (hand.chords = parseInt(v) as 0 | 3 | 4));
+    if (h === 1) {
+      mkSelect(flds, 'Accompagnement', [['basic', 'Basique'], ['alberti', 'Alberti'], ['arpeggio', 'Arpèges'], ['sustained', 'Tenus'], ['pulse', 'Pulsé']], () => cfg.accompaniment ?? 'basic', (v) => (cfg.accompaniment = v as Accompaniment));
+    }
 
     const kb = el('canvas', 'keys');
     const KW = 22;
@@ -195,7 +223,7 @@ export function renderGenerator(root: HTMLElement, onPlay: (g: GenScore) => void
         }
       }
       for (const r of chipRefresh) r();
-      keyLbl.textContent = `Tonalité : ${keyOf(cfg)}`;
+      refreshKey();
     };
     drawKb();
 
@@ -266,39 +294,136 @@ export function renderGenerator(root: HTMLElement, onPlay: (g: GenScore) => void
     return card;
   };
 
-  const keyLbl = el('span', 'gl key-lbl', `Tonalité : ${keyOf(cfg)}`);
+  const amb = el('div', 'presets amb');
+  const rand = <T>(arr: readonly T[]): T => arr[Math.floor(Math.random() * arr.length)];
+  interface HandPatch {
+    level?: number;
+    long?: 0 | 2 | 4;
+    chords?: 0 | 3 | 4;
+  }
+  interface StylePatch {
+    contour?: Contour;
+    accompaniment?: Accompaniment;
+    harmony?: Harmony;
+    motif?: Tri;
+    syncop?: Tri;
+    rests?: Tri;
+    bpm?: number;
+    rh?: HandPatch;
+    lh?: HandPatch;
+  }
+  const setStyle = (o: StylePatch) => {
+    if (o.contour !== undefined) cfg.contour = o.contour;
+    if (o.accompaniment !== undefined) cfg.accompaniment = o.accompaniment;
+    if (o.harmony !== undefined) cfg.harmony = o.harmony;
+    if (o.motif !== undefined) cfg.motif = o.motif;
+    if (o.syncop !== undefined) cfg.syncop = o.syncop;
+    if (o.rests !== undefined) cfg.rests = o.rests;
+    if (o.bpm !== undefined) cfg.bpm = o.bpm;
+    if (o.rh) Object.assign(cfg.rh, o.rh);
+    if (o.lh) Object.assign(cfg.lh, o.lh);
+  };
+  const toggleMode = () => {
+    const g = new Generator(cfg);
+    cfg.key = { root: (g.root + (g.minor ? 3 : 9)) % 12, minor: !g.minor };
+  };
+  const mkAmb = (lbl: string, fn: () => void) => {
+    const b = el('button', 'chip', lbl);
+    b.addEventListener('click', () => {
+      fn();
+      for (const f of syncUI) f();
+      refreshKey();
+    });
+    amb.append(b);
+  };
+  mkAmb('🌼 Naïf', () =>
+    setStyle({ contour: 'smooth', accompaniment: 'alberti', harmony: 'classic', motif: 2, syncop: 0, rests: 0, bpm: 96, rh: { level: 2, long: 2, chords: 3 }, lh: { level: 2, long: 2, chords: 3 } })
+  );
+  mkAmb('🌙 Calme', () =>
+    setStyle({ contour: 'smooth', accompaniment: 'sustained', harmony: 'classic', motif: 1, syncop: 0, rests: 0, bpm: 66, rh: { level: 1, long: 4, chords: 3 }, lh: { level: 1, long: 4, chords: 3 } })
+  );
+  mkAmb('☀️ Joyeux', () =>
+    setStyle({ contour: 'wave', accompaniment: 'alberti', harmony: 'loop', motif: 1, syncop: 1, rests: 1, bpm: 112, rh: { level: 3, long: 0, chords: 3 }, lh: { level: 2, long: 0, chords: 3 } })
+  );
+  mkAmb('🌧 Mélancolique', () => {
+    toggleMode();
+    setStyle({ contour: 'smooth', accompaniment: 'arpeggio', harmony: 'classic', motif: 1, syncop: 0, rests: 1, bpm: 72, rh: { level: 2, long: 2, chords: 3 }, lh: { level: 1, long: 2, chords: 3 } });
+  });
+  mkAmb('⚡ Épique', () =>
+    setStyle({ contour: 'leap', accompaniment: 'pulse', harmony: 'classic', motif: 2, syncop: 1, rests: 0, bpm: 100, rh: { level: 2, long: 2, chords: 4 }, lh: { level: 2, long: 2, chords: 4 } })
+  );
+  mkAmb('🎷 Jazzy', () =>
+    setStyle({ contour: 'leap', accompaniment: 'alberti', harmony: 'varied', motif: 1, syncop: 2, rests: 1, bpm: 126, rh: { level: 3, long: 0, chords: 4 }, lh: { level: 2, long: 0, chords: 4 } })
+  );
+  mkAmb('🎲 Surprends-moi', () => {
+    cfg.contour = rand(['smooth', 'wave', 'leap'] as const);
+    cfg.accompaniment = rand(['alberti', 'arpeggio', 'sustained', 'pulse'] as const);
+    cfg.harmony = rand(['classic', 'varied', 'loop'] as const);
+    cfg.motif = rand([0, 1, 2] as const);
+    cfg.syncop = rand([0, 1, 2] as const);
+    cfg.rests = rand([0, 1, 2] as const);
+    cfg.bpm = 60 + Math.floor(Math.random() * 70);
+    cfg.seed = Math.floor(Math.random() * 1e9);
+  });
 
   const hands = el('div', 'hands');
   hands.append(handCard(1), handCard(0));
 
-  const genGlobal = el('div', 'gen-global');
-  const timeSel = el('select') as HTMLSelectElement;
-  for (const t of ['4/4', '3/4', '2/4']) {
-    const o = el('option');
-    o.value = t;
-    o.textContent = t;
-    timeSel.append(o);
-  }
+  const settings = el('div', 'gen-global');
+  const genTop = el('div', 'gen-top');
+  genTop.append(el('span', 'gl sec-title', 'Réglages musicaux'), keyLbl);
+  const sflds = el('div', 'flds');
+  settings.append(genTop, sflds);
+
+  mkSelect(sflds, 'Tonalité', keyOptions, () => keyStr(cfg.key), (v) => (cfg.key = parseKey(v)));
+  mkSelect(sflds, 'Harmonie', [['classic', 'Classique'], ['varied', 'Variée'], ['loop', 'Boucle']], () => cfg.harmony ?? 'classic', (v) => (cfg.harmony = v as Harmony));
+  mkSelect(sflds, 'Mélodie', [['smooth', 'Conjointe'], ['wave', 'Ondulante'], ['leap', 'Sautillante']], () => cfg.contour ?? 'wave', (v) => (cfg.contour = v as Contour));
+  mkSelect(sflds, 'Syncopes', [['0', 'Aucune'], ['1', 'Quelques-unes'], ['2', 'Rythmées']], () => String(cfg.syncop ?? 0), (v) => (cfg.syncop = parseInt(v) as 0 | 1 | 2));
+  mkSelect(sflds, 'Thème', [['0', 'Libre'], ['1', 'Modéré'], ['2', 'Insistant']], () => String(cfg.motif ?? 1), (v) => (cfg.motif = parseInt(v) as 0 | 1 | 2));
+  mkSelect(sflds, 'Silences', [['0', 'Rares'], ['1', 'Normaux'], ['2', 'Aérés']], () => String(cfg.rests ?? 1), (v) => (cfg.rests = parseInt(v) as 0 | 1 | 2));
+  mkSelect(sflds, 'Mesure', [['4/4', '4/4'], ['3/4', '3/4'], ['2/4', '2/4']], () => `${cfg.time[0]}/${cfg.time[1]}`, (v) => {
+    const [a, b] = v.split('/').map((x) => parseInt(x));
+    cfg.time = [a, b];
+  });
+
+  const tempoBox = el('label', 'fld');
+  tempoBox.append(el('span', undefined, 'Tempo'));
+  const tempoRow = el('div', 'tempo-row');
   const tempoB = el('input') as HTMLInputElement;
   tempoB.type = 'range';
   tempoB.min = '40';
   tempoB.max = '180';
-  tempoB.value = String(cfg.bpm);
-  const tempoLbl = el('span', 'bpm', `♩ = ${cfg.bpm}`);
+  const tempoLbl = el('span', 'bpm');
   tempoB.addEventListener('input', () => {
     cfg.bpm = parseInt(tempoB.value);
     tempoLbl.textContent = `♩ = ${cfg.bpm}`;
   });
+  tempoRow.append(tempoB, tempoLbl);
+  tempoBox.append(tempoRow);
+  syncUI.push(() => {
+    tempoB.value = String(cfg.bpm);
+    tempoLbl.textContent = `♩ = ${cfg.bpm}`;
+  });
+  sflds.append(tempoBox);
+
+  const seedBox = el('label', 'fld');
+  seedBox.append(el('span', undefined, 'Graine'));
+  const seedRow = el('div', 'seed-row');
   const seedIn = el('input') as HTMLInputElement;
   seedIn.type = 'number';
-  seedIn.value = String(cfg.seed);
   const dice = el('button', 'chip', '🎲');
   dice.addEventListener('click', () => {
     cfg.seed = Math.floor(Math.random() * 1e9);
     seedIn.value = String(cfg.seed);
   });
   seedIn.addEventListener('change', () => (cfg.seed = parseInt(seedIn.value) || 1));
-  genGlobal.append(keyLbl, el('span', 'gl', 'Mesure'), timeSel, el('span', 'gl', 'Tempo'), tempoB, tempoLbl, el('span', 'gl', 'Graine'), seedIn, dice);
+  seedRow.append(seedIn, dice);
+  seedBox.append(seedRow);
+  syncUI.push(() => (seedIn.value = String(cfg.seed)));
+  sflds.append(seedBox);
+
+  for (const f of syncUI) f();
+  refreshKey();
 
   const start = el('button', 'primary', '▶ Générer et jouer');
   start.addEventListener('click', () => {
@@ -307,10 +432,9 @@ export function renderGenerator(root: HTMLElement, onPlay: (g: GenScore) => void
       err.textContent = 'Chaque main activée doit avoir au moins une note sélectionnée.';
       return;
     }
-    cfg.time = timeSel.value.split('/').map((x) => parseInt(x)) as [number, number];
     onPlay(makeGeneratorScore(cfg));
   });
 
-  wrap.append(head, hands, genGlobal, start, err);
+  wrap.append(head, amb, hands, settings, start, err);
   root.append(wrap);
 }
