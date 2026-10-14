@@ -9,13 +9,13 @@ export default defineConfig({
       manifest: {
         name: 'Piano Reader',
         short_name: 'PianoReader',
-        description: 'Lecture de partition avec tempo réglable et générateur infini de notes',
-        lang: 'fr',
+        description: 'Play your sheet music and train sight-reading at your own tempo',
+        lang: 'en',
         start_url: '/',
         display: 'standalone',
         orientation: 'any',
-        theme_color: '#0f172a',
-        background_color: '#f8fafc',
+        theme_color: '#fbfaf7',
+        background_color: '#fbfaf7',
         icons: [
           { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },

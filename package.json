@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "icons": "node scripts/gen-icons.mjs",
-    "test": "tsx tests/smoke.ts"
+    "test": "tsx tests/smoke.ts && tsx tests/render.ts",
+    "test:ui": "tsx tests/ui-test.mts"
   },
   "dependencies": {
     "fflate": "^0.8.2",

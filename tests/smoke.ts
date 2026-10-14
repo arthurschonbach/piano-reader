@@ -1,8 +1,10 @@
 import { DOMParser } from 'linkedom';
 import { parseXmlDoc } from '../src/musicxml';
-import { Generator, makeGeneratorScore } from '../src/generator';
+import { makeExercise } from '../src/generator';
+import { onsetsInRange, SoundEngine } from '../src/audio';
+import { recordSession } from '../src/stats';
 import { makeDemoScore } from '../src/demo';
-import { computeTies, midiOf } from '../src/model';
+import { computeTies, midiOf, type Score } from '../src/model';
 
 const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <score-partwise version="3.1">
@@ -41,132 +43,179 @@ const score = parseXmlDoc(doc, 'test.musicxml');
 
 const assert = (cond: boolean, msg: string) => {
   if (!cond) {
-    console.error(`ÉCHEC: ${msg}`);
+    console.error(`FAIL: ${msg}`);
     process.exit(1);
   }
   console.log(`ok: ${msg}`);
 };
 
-assert(score.title === 'Test', 'titre depuis work-title');
-assert(score.bpm === 72, 'tempo depuis <sound tempo>');
-assert(score.measures.length === 2, '2 mesures');
-assert(score.staves === 2, '2 portées');
-assert(score.clefs[0] === 'G' && score.clefs[1] === 'F', 'clés G/F');
-assert(score.measures[0].key === -1, 'armure -1');
+assert(score.title === 'Test', 'title from work-title');
+assert(score.bpm === 72, 'tempo from <sound tempo>');
+assert(score.measures.length === 2, '2 bars');
+assert(score.staves === 2, '2 staves');
+assert(score.clefs[0] === 'G' && score.clefs[1] === 'F', 'G/F clefs');
+assert(score.measures[0].key === -1, 'key signature -1');
 
 const m1 = score.measures[0];
-assert(m1.notes.length === 4, 'mesure 1: 4 événements (accord C/E + demi G + ronde F#)');
+assert(m1.notes.length === 4, 'bar 1: 4 events (C/E chord + G half + F# whole)');
 const rhChord = m1.notes.filter((n) => n.beat === 0 && n.staff === 0);
-assert(rhChord.length === 2, 'accord de 2 notes RH au temps 0');
-assert(rhChord.some((n) => n.chord), 'note d accord marquée');
+assert(rhChord.length === 2, '2-note RH chord on beat 0');
+assert(rhChord.some((n) => n.chord), 'chord member flagged');
 const g4 = m1.notes.find((n) => n.beat === 1)!;
-assert(g4 && g4.dur === 2, 'G4 demi au temps 1');
+assert(g4 && g4.dur === 2, 'G4 half note on beat 1');
 const wholeLh = m1.notes.find((n) => n.staff === 1)!;
-assert(wholeLh.beat === 0 && wholeLh.dur === 4, 'main gauche: ronde au début');
+assert(wholeLh.beat === 0 && wholeLh.dur === 4, 'left hand: whole note at the start');
 assert(wholeLh.midi === midiOf({ step: 3, alter: 1, octave: 3 }), 'midi F#3 = 54');
 
 const m2 = score.measures[1];
-assert(m2.startBeat === 4, 'mesure 2 démarre à 4 temps');
-assert(m2.length === 4, 'mesure 2 de 4 temps');
+assert(m2.startBeat === 4, 'bar 2 starts on beat 4');
+assert(m2.length === 4, 'bar 2 is 4 beats');
 const a = m2.notes.find((n) => n.spell.step === 5 && n.staff === 0)!;
-assert(a.tieStart && a.dur === 1 && a.beat === 4, 'tie start sur A4 au temps 4');
+assert(a.tieStart && a.dur === 1 && a.beat === 4, 'tie start on A4 at beat 4');
 const restLh = m2.notes.find((n) => n.staff === 1)!;
-assert(restLh.rest && restLh.base === 4, 'silence de mesure = pause générale');
+assert(restLh.rest && restLh.base === 4, 'full-bar rest in LH');
 
 computeTies(score);
-assert(a.tieEnd === 6, 'tie étend A4 jusqu à 6');
-assert(a.tieTarget !== null && a.tieTarget.beat === 5, 'tieTarget au beat suivant');
+assert(a.tieEnd === 6, 'tie extends A4 to beat 6');
+assert(a.tieTarget !== null && a.tieTarget.beat === 5, 'tieTarget on the next beat');
 
 const demo = makeDemoScore();
-assert(demo.measures.length === 8, 'démo: 8 mesures');
-assert(demo.measures[1].startBeat === 4, 'démo: mesures de 4 temps');
-assert(demo.measures.every((m) => m.notes.some((n) => n.staff === 0) && m.notes.some((n) => n.staff === 1)), 'démo: 2 mains');
+assert(demo.measures.length === 8, 'demo: 8 bars');
+assert(demo.measures[1].startBeat === 4, 'demo: 4-beat bars');
+assert(demo.measures.every((m) => m.notes.some((n) => n.staff === 0) && m.notes.some((n) => n.staff === 1)), 'demo: both hands');
 
-const gen = makeGeneratorScore({
-  rh: { enabled: true, notes: [60, 62, 64, 65, 67], level: 3 },
-  lh: { enabled: true, notes: [48, 52, 55], level: 1 },
-  time: [4, 4],
-  bpm: 80,
-  seed: 42
-});
-const gs = gen.score;
-assert(gs.measures.length >= 8, 'génération pré-remplit 8+ mesures');
-assert(gs.measures.every((m) => m.length === 4), 'génération: mesures de 4 temps');
+// --- Sight-reading exercises ---
+
+const C_PCS = new Set([0, 2, 4, 5, 7, 9, 11]);
+
+const ex = makeExercise({ hands: 'right', level: 1, key: 'C', bpm: 60, seed: 42 });
+const gs: Score = ex.score;
+assert(gs.measures.length >= 8, 'exercise: 8+ bars pre-generated');
+assert(gs.measures.every((m) => m.length === 4), 'exercise: 4-beat bars');
 for (let i = 1; i < gs.measures.length; i++) {
-  assert(gs.measures[i].startBeat === gs.measures[i - 1].startBeat + gs.measures[i - 1].length, `mesure ${i + 1} enchaînée`);
+  assert(
+    gs.measures[i].startBeat === gs.measures[i - 1].startBeat + gs.measures[i - 1].length,
+    `bar ${i + 1} follows the previous one`
+  );
 }
-assert(
-  gs.measures.every((m) => m.notes.filter((n) => !n.rest).every((n) => [60, 62, 64, 65, 67, 48, 52, 55].includes(n.midi))),
-  'notes générées dans les sets choisis'
-);
-
-const genProbe = new Generator({ rh: { enabled: true, notes: [60, 62, 64, 65, 67], level: 3 }, lh: { enabled: true, notes: [48, 52, 55], level: 1 }, time: [4, 4], bpm: 80, seed: 42 });
-assert(genProbe.keyName === 'Do majeur', `tonalité inférée: Do majeur (reçu: ${genProbe.keyName})`);
-assert(genProbe.keyFifths === 0, 'armure Do majeur = 0');
-
+assert(gs.staves === 1 && gs.clefs[0] === 'G', 'right hand only: single treble staff');
 for (const m of gs.measures) {
-  const rhNotes = m.notes.filter((n) => n.staff === 0 && !n.rest);
-  assert(rhNotes.every((n) => [0, 2, 4, 5, 7, 9, 11].includes(((n.midi % 12) + 12) % 12)), `mesure ${m.number}: RH diatonique`);
-  const sum = m.notes.filter((n) => n.staff === 0).reduce((a, n) => a + n.dur, 0);
-  assert(Math.abs(sum - 4) < 1e-6, `mesure ${m.number}: RH remplit 4 temps`);
-  const lhSum = m.notes.filter((n) => n.staff === 1).reduce((a, n) => a + n.dur, 0);
-  assert(Math.abs(lhSum - 4) < 1e-6, `mesure ${m.number}: LH remplit 4 temps`);
+  assert(m.notes.filter((n) => !n.rest).every((n) => C_PCS.has(((n.midi % 12) + 12) % 12)), `bar ${m.number}: diatonic to C major`);
+  const sum = m.notes.reduce((s, n) => s + n.dur, 0);
+  assert(Math.abs(sum - 4) < 1e-6, `bar ${m.number}: fills 4 beats`);
+  assert(m.notes.every((n) => n.dur === 1 || n.dur === 2 || n.dur === 4), `bar ${m.number}: level 1 has no eighth notes`);
 }
+// 8-bar phrase: bar 8 resolves to the tonic.
+const finalBar = gs.measures[7].notes.filter((n) => !n.rest).at(-1)!;
+assert(finalBar.midi % 12 === 0, 'phrase resolves to C');
 
-const phraseEnd = gs.measures[3].notes.filter((n) => n.staff === 0 && !n.rest).at(-1)!;
-assert(((phraseEnd.midi % 12) + 12) % 12 === 0, 'fin de phrase RH résout sur la tonique (Do)');
-
-const m1Lh = gs.measures[0].notes.filter((n) => n.staff === 1 && !n.rest);
-assert(m1Lh.every((n) => [0, 4, 7].includes(((n.midi % 12) + 12) % 12)), 'mesure 1 LH: notes de l accord I (do-mi-sol)');
-
-const genFlat = new Generator({ rh: { enabled: true, notes: [65, 67, 69, 70, 72], level: 2 }, lh: { enabled: true, notes: [53, 57, 60], level: 1 }, time: [4, 4], bpm: 80, seed: 7 });
-assert(genFlat.keyName === 'Fa majeur', `armure Fa majeur (reçu: ${genFlat.keyName})`);
-assert(genFlat.keyFifths === -1, 'Fa majeur = 1 bémol');
-
-gen.ensure(200);
-assert(gs.measures.length >= 50, 'ensure étend le matériau au fil de la lecture');
+ex.ensure(200);
+assert(gs.measures.length >= 50, 'ensure keeps generating while playing');
 const lastM = gs.measures[gs.measures.length - 1];
-assert(lastM.startBeat + lastM.length >= 200, 'matériau généré au-delà de 200 temps');
+assert(lastM.startBeat + lastM.length >= 200, 'material generated past beat 200');
 
-const genChordal = makeGeneratorScore({
-  rh: { enabled: true, notes: [60, 62, 64, 65, 67], level: 2, long: 0, chords: 3 },
-  lh: { enabled: true, notes: [48, 52, 55], level: 1, long: 2, chords: 3 },
-  time: [4, 4],
-  bpm: 80,
-  seed: 11
-});
-const gc = genChordal.score;
-assert(gc.measures.some((m) => m.notes.some((n) => n.chord)), 'accords générés (notes marquées chord)');
-for (const m of gc.measures) {
-  for (const n of m.notes.filter((x) => x.chord)) {
-    const prim = m.notes.find((p) => p.beat === n.beat && p.staff === n.staff && !p.chord);
-    assert(!!prim && prim.dur === n.dur, 'membre d accord aligné sur sa note principale');
-    assert([0, 4, 7, 2, 5, 9, 11, 2].includes(((n.midi % 12) + 12) % 12), 'membre d accord diatonique');
-  }
-  const sumPrim = m.notes.filter((n) => n.staff === 0 && !n.chord).reduce((a, n) => a + n.dur, 0);
-  assert(Math.abs(sumPrim - 4) < 1e-6, `mesure ${m.number}: RH (hors accords) remplit 4 temps`);
+const both = makeExercise({ hands: 'both', level: 2, key: 'G', bpm: 80, seed: 7 });
+both.ensure(64);
+assert(both.score.staves === 2, 'both hands: two staves');
+assert(both.score.measures.every((m) => m.notes.some((n) => n.staff === 0) && m.notes.some((n) => n.staff === 1)), 'both hands: every bar has both hands');
+for (const m of both.score.measures) {
+  const lh = m.notes.filter((n) => n.staff === 1);
+  const sum = lh.reduce((s, n) => s + n.dur, 0);
+  assert(Math.abs(sum - 4) < 1e-6, `bar ${m.number}: LH fills 4 beats`);
+  assert(lh.every((n) => n.dur >= 2), `bar ${m.number}: LH in long values`);
 }
-const gcM1 = gc.measures[0];
-const m1LhBlock = gcM1.notes.filter((n) => n.staff === 1 && !n.rest && n.beat === gcM1.startBeat);
-assert(m1LhBlock.length >= 3, 'LH joue un bloc d accord en début de mesure');
-assert(m1LhBlock.every((n) => n.dur === m1LhBlock[0].dur), 'bloc d accord homogène');
-assert(m1LhBlock.every((n) => [0, 4, 7].includes(((n.midi % 12) + 12) % 12)), 'bloc d accord = triade de Do');
 
-const genLong = makeGeneratorScore({
-  rh: { enabled: true, notes: [60, 62, 64, 65, 67], level: 1, long: 4, chords: 0 },
-  lh: { enabled: false, notes: [], level: 1, long: 0 },
-  time: [4, 4],
-  bpm: 80,
-  seed: 5
-});
-const gl = genLong.score;
-genLong.ensure(64);
-assert(gl.measures.length >= 16, 'genLong: 16+ mesures');
-const longs = gl.measures.flatMap((m) => m.notes).filter((n) => n.staff === 0 && !n.rest && n.dur >= 2);
-assert(longs.length > 0, 'notes longues (blanches/roundes) générées');
-assert(
-  longs.every((n) => n.base === n.dur && (n.dur === 2 || n.dur === 4)),
-  'notes longues = blanches (2) ou rondes (4)'
-);
+const left = makeExercise({ hands: 'left', level: 1, key: 'Am', bpm: 60, seed: 3 });
+assert(left.score.staves === 1 && left.score.clefs[0] === 'F', 'left hand only: single bass staff');
+assert(left.score.measures.every((m) => m.notes.every((n) => n.staff === 1)), 'left hand only: nothing on staff 0');
 
-console.log('\nTous les tests passent.');
+// --- Sound scheduling helpers (pure, no AudioContext needed) ---
+
+const on0 = onsetsInRange(demo, -0.001, 0.001);
+assert(on0.length === 2, 'demo beat 0: melody C4 + bass C3 sound together');
+assert(on0.some((o) => o.midi === 60 && o.durBeats === 1), 'melody onset carries its beat duration');
+assert(on0.some((o) => o.midi === 48 && o.durBeats === 2), 'bass onset carries its beat duration');
+
+const chordOn = onsetsInRange(score, -0.001, 0.001);
+assert(chordOn.length === 3, 'imported chord: both members + bass whole note scheduled');
+assert(chordOn.filter((o) => o.beat === 0).length === 3, 'all three share the onset beat');
+
+assert(onsetsInRange(demo, 0, 0).length === 0, 'empty window schedules nothing');
+assert(onsetsInRange(demo, 2, 1).length === 0, 'reversed window schedules nothing');
+const all = onsetsInRange(demo, -1, 100);
+assert(all.every((o, i) => i === 0 || all[i - 1].beat <= o.beat), 'onsets come out in beat order');
+assert(all.every((o) => o.durBeats >= 0.15), 'every onset has a singable duration');
+assert(on0.every((o) => o.accent), 'bar-line onsets are accented');
+assert(onsetsInRange(demo, 0.5, 1.5).every((o) => !o.accent), 'off-beat onsets are not accented');
+
+// --- Multi-part import: hands split across two parts ---
+
+const twoPart = `<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="3.1">
+  <work><work-title>Two Hands</work-title></work>
+  <part-list>
+    <score-part id="P1"><part-name>Right</part-name></score-part>
+    <score-part id="P2"><part-name>Left</part-name></score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>1</divisions>
+        <clef><sign>G</sign><line>2</line></clef>
+      </attributes>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><voice>1</voice><type>quarter</type></note>
+      <note><pitch><step>E</step><octave>4</octave></pitch><duration>1</duration><voice>1</voice><type>quarter</type></note>
+    </measure>
+  </part>
+  <part id="P2">
+    <measure number="1">
+      <attributes>
+        <divisions>1</divisions>
+        <clef><sign>F</sign><line>4</line></clef>
+      </attributes>
+      <note><pitch><step>C</step><octave>3</octave></pitch><duration>2</duration><voice>1</voice><type>half</type></note>
+    </measure>
+  </part>
+</score-partwise>
+`;
+const doc2 = new DOMParser().parseFromString(twoPart, 'text/xml') as unknown as Document;
+const merged = parseXmlDoc(doc2, 'two.xml');
+assert(merged.title === 'Two Hands', 'two-part: title kept');
+assert(merged.measures.length === 1, 'two-part: bars merged by index');
+assert(merged.staves === 2, 'two-part: both hands kept');
+assert(merged.clefs[0] === 'G' && merged.clefs[1] === 'F', 'two-part: clefs from each part');
+const mm = merged.measures[0];
+assert(mm.notes.some((n) => n.staff === 0 && n.midi === 60), 'two-part: RH note on staff 0');
+assert(mm.notes.some((n) => n.staff === 1 && n.midi === 48), 'two-part: LH note on staff 1');
+assert(Math.abs(mm.length - 2) < 1e-6, 'two-part: bar length is the longest part');
+const lh = mm.notes.find((n) => n.staff === 1)!;
+assert(lh.beat === mm.startBeat, 'two-part: hands stay time-aligned');
+
+// --- Practice stats ---
+
+let stats = recordSession([], { key: 'right·1·C', label: 'Right hand · Level 1 · C major', bars: 8, tempo: 60, now: 1000 });
+assert(stats.length === 1 && stats[0].sessions === 1 && stats[0].bars === 8, 'first session recorded');
+stats = recordSession(stats, { key: 'right·1·C', label: 'Right hand · Level 1 · C major', bars: 12, tempo: 72, now: 2000 });
+assert(stats.length === 1 && stats[0].sessions === 2 && stats[0].bars === 20, 'repeat sessions accumulate');
+assert(stats[0].topTempo === 72, 'top tempo tracks the fastest session');
+stats = recordSession(stats, { key: 'both·2·G', label: 'Both hands · Level 2 · G major', bars: 4, tempo: 80, now: 3000 });
+assert(stats.length === 2 && stats[0].key === 'both·2·G', 'most recent practice sorts first');
+assert(recordSession(stats, { key: 'x', label: 'X', bars: -2, tempo: -5, now: 4000 }).find((s) => s.key === 'x')?.bars === 0, 'nonsense input clamps to zero');
+
+// --- First-note regression: the onset under the cursor must sound ---
+
+assert(onsetsInRange(demo, 0 - 1e-4, 0 + 0.3).some((o) => o.beat === 0), 'cursor window includes the onset at beat 0');
+assert(!onsetsInRange(demo, 0, 0 + 0.3).some((o) => o.beat === 0), 'streaming windows stay half-open (no double plays)');
+{
+  // White-box: reset() must park just before the cursor, never exactly on it.
+  const engine = new SoundEngine();
+  engine.reset(0);
+  const su = (engine as unknown as { scheduledUntil: number }).scheduledUntil;
+  assert(su < 0 && su > -0.01, 'reset(0) parks the window before beat 0');
+  engine.reset(5);
+  const su5 = (engine as unknown as { scheduledUntil: number }).scheduledUntil;
+  assert(su5 < 5 && su5 > 5 - 0.01, 'reset(5) parks the window before beat 5');
+  assert(onsetsInRange(demo, su, su + 0.31).some((o) => o.beat === 0), 'first sync after reset(0) schedules the first note');
+}
+
+console.log('\nAll tests pass.');

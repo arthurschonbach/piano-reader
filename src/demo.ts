@@ -56,5 +56,5 @@ export function makeDemoScore(): Score {
     });
     startBeat += 4;
   }
-  return { title: 'Ah ! vous dirai-je maman', bpm: 100, measures, infinite: false, staves: 2, clefs: ['G', 'F'] };
+  return { title: 'Twinkle Twinkle Little Star', bpm: 100, measures, infinite: false, staves: 2, clefs: ['G', 'F'] };
 }

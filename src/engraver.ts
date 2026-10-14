@@ -2,13 +2,14 @@ import { CanvasContext, Glyph } from 'vexflow';
 import { measureAt, totalBeats, type Measure, type NoteItem, type Score } from './model';
 
 const K = 0.001036;
-export const HAND = ['#2563eb', '#ea580c'];
-const INK = '#3b4757';
-const PLAYED = '#9daebf';
-const REST_C = '#9aa5b1';
-const REST_PLAYED = '#e2e7ed';
-const STAFF = '#a9b6c3';
-const BAR = '#8d99a6';
+export const HAND = ['#201b13', '#201b13'];
+const INK = '#201b13';
+const PLAYED = '#cfc8bb';
+const REST_C = '#8a8378';
+const REST_PLAYED = '#e2dccd';
+const STAFF = '#ddd5c4';
+const BAR = '#a89e8c';
+const ACCENT = '#d9481c';
 
 const SHARP_STEPS = [3, 0, 4, 1, 5, 2, 6];
 const FLAT_STEPS = [6, 2, 5, 1, 4, 0, 3];
@@ -140,7 +141,7 @@ export class ScoreRenderer {
 
   constructor(private canvas: HTMLCanvasElement) {
     const c = canvas.getContext('2d');
-    if (!c) throw new Error('Canvas 2D indisponible');
+    if (!c) throw new Error('Canvas 2D unavailable');
     this.ctx = c;
     VCTX = new CanvasContext(c);
   }
@@ -170,7 +171,7 @@ export class ScoreRenderer {
     const { ctx, w, h } = this;
     if (w < 2 || h < 2) return;
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = '#fdfdfe';
+    ctx.fillStyle = '#fbfaf7';
     ctx.fillRect(0, 0, w, h);
 
     const U = s.zoom;
@@ -211,8 +212,7 @@ export class ScoreRenderer {
       visible.push(i);
     }
 
-    ctx.fillStyle = 'rgba(37,99,235,0.05)';
-    ctx.fillRect(xOf(s.beat), trebleTop - 12 * U, s.lookahead * pxQ, (bassBottom - trebleTop) + 24 * U);
+    // progression wash removed — sobre: plain paper
 
     ctx.strokeStyle = STAFF;
     ctx.lineWidth = 1;
@@ -306,7 +306,7 @@ export class ScoreRenderer {
       ctx.textAlign = 'center';
       ctx.font = `600 ${Math.max(9, 1.1 * SP)}px system-ui, sans-serif`;
       ctx.lineWidth = 3.5;
-      ctx.strokeStyle = 'rgba(253,253,254,0.92)';
+      ctx.strokeStyle = 'rgba(251,250,247,0.92)';
       for (let j = 0; j < visible.length; j++) {
         for (const c of measureClusters[j]) {
           if (c.rest || c.grace) continue;
@@ -320,19 +320,12 @@ export class ScoreRenderer {
     }
 
     const px = xOf(s.beat);
-    ctx.strokeStyle = '#0f172a';
-    ctx.lineWidth = 2.2 * U;
+    ctx.strokeStyle = ACCENT;
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(px, trebleTop - 14 * U);
-    ctx.lineTo(px, (single ? trebleBottom : bassBottom) + 14 * U);
+    ctx.moveTo(px, trebleTop - 8);
+    ctx.lineTo(px, (single ? trebleBottom : bassBottom) + 8);
     ctx.stroke();
-    ctx.fillStyle = '#0f172a';
-    ctx.beginPath();
-    ctx.moveTo(px - 6 * U, trebleTop - 16 * U);
-    ctx.lineTo(px + 6 * U, trebleTop - 16 * U);
-    ctx.lineTo(px, trebleTop - 7 * U);
-    ctx.closePath();
-    ctx.fill();
   }
 
   private drawMeasureHeader(
@@ -494,17 +487,6 @@ function drawStream(ctx: CanvasRenderingContext2D, list: Cluster[], e: StreamEnv
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
 
-    if (c.state === 2 && !c.rest) {
-      ctx.save();
-      ctx.globalAlpha = 0.15;
-      for (const n of c.members) {
-        ctx.beginPath();
-        ctx.arc(c.x + headW / 2, yIdx(idxOf(n)), 1.9 * SP, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.restore();
-    }
-
     if (c.rest) {
       drawRest(ctx, c, e.staffTop[st], SP, color);
       continue;
@@ -521,16 +503,6 @@ function drawStream(ctx: CanvasRenderingContext2D, list: Cluster[], e: StreamEnv
       for (let L = bIdx - 2; L >= idx; L -= 2) drawLedger(ctx, c.x, yIdx(L), SP, hw);
       const gx = c.grace ? c.x - 1.4 * SP : c.x;
       drawG(code, em, gx, y, 'cink');
-      if (c.state === 1 && !c.grace) {
-        ctx.save();
-        ctx.globalAlpha = 0.3;
-        ctx.strokeStyle = HAND[st];
-        ctx.lineWidth = 1.4;
-        ctx.beginPath();
-        ctx.arc(gx + hw / 2, y, hw * 0.75, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.restore();
-      }
       const printed = n.printed ? PRINTED_ALTER[n.printed] : null;
       let accDraw: number | null = null;
       if (printed !== null && printed !== undefined) {

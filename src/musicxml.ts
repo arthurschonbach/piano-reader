@@ -24,21 +24,14 @@ function text(el: Element | null): string {
   return (el?.textContent ?? '').trim();
 }
 
-export function parseXmlDoc(doc: Document, fallbackTitle: string): Score {
-  if (doc.getElementsByTagName('parsererror').length) throw new Error('XML invalide');
-  const root = doc.getElementsByTagName('score-partwise')[0];
-  if (!root) throw new Error('MusicXML « score-partwise » introuvable');
+interface PartScore {
+  measures: Measure[];
+  clefs: string[];
+  staves: number;
+  bpm: number;
+}
 
-  const title =
-    text(one(root, 'movement-title')) ||
-    text(one(root, 'work-title')) ||
-    fallbackTitle.replace(/\.(mxl|musicxml|xml)$/i, '') ||
-    'Partition';
-
-  const parts = root.getElementsByTagName('part');
-  if (!parts.length) throw new Error('Aucune partie dans le fichier');
-  const part = parts[0];
-
+function parseOnePart(part: Element): PartScore {
   let divisions = 1;
   let fifths = 0;
   let time: [number, number] = [4, 4];
@@ -206,7 +199,93 @@ export function parseXmlDoc(doc: Document, fallbackTitle: string): Score {
   const clefs: string[] = [clefByStaff.get(0) ?? 'G', clefByStaff.get(1) ?? 'F'];
   if (staves < 2 && measures.length && !measures.some((m) => m.notes.some((n) => n.staff === 1))) staves = 1;
 
-  return { title, bpm: bpm > 0 ? bpm : 100, measures, infinite: false, staves, clefs };
+  return { measures, clefs, staves, bpm };
+}
+
+export function parseXmlDoc(doc: Document, fallbackTitle: string): Score {
+  if (doc.getElementsByTagName('parsererror').length) throw new Error('Invalid XML');
+  const root = doc.getElementsByTagName('score-partwise')[0];
+  if (!root) throw new Error('No MusicXML “score-partwise” found');
+
+  const title =
+    text(one(root, 'movement-title')) ||
+    text(one(root, 'work-title')) ||
+    fallbackTitle.replace(/\.(mxl|musicxml|xml)$/i, '') ||
+    'Untitled score';
+
+  const partEls = Array.from(root.getElementsByTagName('part'));
+  if (!partEls.length) throw new Error('No parts in this file');
+  const parts = partEls.map(parseOnePart);
+  if (parts.length === 1) {
+    const p = parts[0];
+    return { title, bpm: p.bpm > 0 ? p.bpm : 100, measures: p.measures, infinite: false, staves: p.staves, clefs: p.clefs };
+  }
+  return mergeParts(title, parts);
+}
+
+/**
+ * Merge several parts bar-by-bar. Piano files sometimes split the hands
+ * into separate parts; dropping all but the first would silently lose
+ * half the music. Extra staves beyond two are folded into the lower staff.
+ */
+function mergeParts(title: string, parts: PartScore[]): Score {
+  const offsets: number[] = [];
+  {
+    let acc = 0;
+    for (const p of parts) {
+      offsets.push(acc);
+      acc += Math.max(1, p.staves);
+    }
+  }
+  const fold = (s: number): number => Math.min(s, 1);
+  const clefs: string[] = [];
+  for (const p of parts) for (const c of p.clefs.slice(0, p.staves)) clefs.push(c);
+  while (clefs.length < 2) clefs.push(clefs.length === 0 ? 'G' : 'F');
+
+  const count = Math.max(...parts.map((p) => p.measures.length));
+  const measures: Measure[] = [];
+  let startBeat = 0;
+  for (let i = 0; i < count; i++) {
+    const avail = parts.map((p) => p.measures[i]).filter((m) => !!m);
+    const length = avail.length ? Math.max(...avail.map((m) => m.length)) : 4;
+    const notes: ReturnType<typeof makeNote>[] = [];
+    for (let pi = 0; pi < parts.length; pi++) {
+      const m = parts[pi].measures[i];
+      if (!m) continue;
+      // Copy notes so merged beats/staves don't mutate the per-part data,
+      // then re-link ties to the copies (spans keep working across bars).
+      const remap = new Map<ReturnType<typeof makeNote>, ReturnType<typeof makeNote>>();
+      for (const n of m.notes) {
+        const c = { ...n, beat: n.beat - m.startBeat + startBeat, staff: fold(n.staff + offsets[pi]), tieTarget: null };
+        remap.set(n, c);
+        notes.push(c);
+      }
+      for (const n of m.notes) {
+        const c = remap.get(n)!;
+        if (n.tieTarget) {
+          const t = remap.get(n.tieTarget) ?? null;
+          c.tieTarget = t;
+          if (t) c.tieEnd = t.beat + t.dur;
+        }
+      }
+    }
+    notes.sort((a, b) => a.beat - b.beat);
+    const first = avail[0];
+    measures.push({
+      number: i + 1,
+      startBeat,
+      length,
+      key: first ? first.key : 0,
+      keyChange: i === 0 || avail.some((m) => m.keyChange),
+      time: i === 0 || avail.some((m) => m.time !== null) ? (avail.find((m) => m.time !== null)?.time ?? [...first.time!]) : null,
+      notes
+    });
+    startBeat += length;
+  }
+
+  const totalStaves = offsets[offsets.length - 1] + Math.max(1, parts[parts.length - 1].staves);
+  const bpm = parts.find((p) => p.bpm > 0)?.bpm ?? 100;
+  return { title, bpm, measures, infinite: false, staves: Math.min(2, totalStaves), clefs: clefs.slice(0, 2) };
 }
 
 export async function parseMusicXml(file: File): Promise<Score> {
@@ -227,7 +306,7 @@ export async function parseMusicXml(file: File): Promise<Score> {
         Object.keys(entries).find((k) => k.toLowerCase().endsWith('.xml')) ??
         null;
     }
-    if (!mainPath || !entries[mainPath]) throw new Error('Archive .mxl illisible');
+    if (!mainPath || !entries[mainPath]) throw new Error('Unreadable .mxl archive');
     xml = strFromU8(entries[mainPath]);
     name = mainPath.split('/').pop() ?? name;
   } else {
