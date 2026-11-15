@@ -27,6 +27,8 @@ export interface TouchSummary {
   heldJudged: number;
   /** Notes released too early, earliest first: written start beats. */
   shortAt: number[];
+  /** Notes held into the next one, earliest first: written start beats. */
+  longAt: number[];
   /** Joins between two notes of one hand with no audible gap. */
   legato?: number;
   /** Spread of velocity on the melody (standard deviation, within each dynamic). */
@@ -51,10 +53,23 @@ export function holdDeadline(start: number, end: number, msPerBeat: number): num
   return end - Math.max(HOLD_SLACK.share * (end - start), HOLD_SLACK.minMs / msPerBeat);
 }
 
+/** A note may run this far past its written end before it blurs into the next one. */
+export const LONG_SLACK = { share: 0.25, minMs: 200 };
+
+/**
+ * Held the right length, let go too early, or held too long (only judged when
+ * another note of that hand follows: holding the last note is harmless).
+ */
+export function holdVerdict(start: number, end: number, off: number, msPerBeat: number, hasNext: boolean): 'ok' | 'short' | 'long' {
+  if (off < holdDeadline(start, end, msPerBeat) - 1e-9) return 'short';
+  if (hasNext && off > end + Math.max(LONG_SLACK.share * (end - start), LONG_SLACK.minMs / msPerBeat) + 1e-9) return 'long';
+  return 'ok';
+}
+
 const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
 
 export function summarizeTouch(notes: TouchNote[], opts: { msPerBeat?: number; melodyStaff?: number } = {}): TouchSummary {
-  const out: TouchSummary = { heldJudged: 0, shortAt: [] };
+  const out: TouchSummary = { heldJudged: 0, shortAt: [], longAt: [] };
   const ms = opts.msPerBeat;
 
   if (ms) {
@@ -69,6 +84,16 @@ export function summarizeTouch(notes: TouchNote[], opts: { msPerBeat?: number; m
     }
     if (out.heldJudged) out.held = ok / out.heldJudged;
     out.shortAt.sort((a, b) => a - b);
+    // Too long: only when a later note of the same hand follows.
+    for (const staff of new Set(notes.map((n) => n.staff))) {
+      const line = notes.filter((n) => n.staff === staff && n.start !== undefined).sort((a, b) => a.start! - b.start!);
+      const lastStart = line.length ? line[line.length - 1].start! : 0;
+      for (const n of line) {
+        if (n.end === undefined || n.off === undefined || n.start! >= lastStart - 1e-9) continue;
+        if (holdVerdict(n.start!, n.end, n.off, ms, true) === 'long') out.longAt.push(n.start!);
+      }
+    }
+    out.longAt = [...new Set(out.longAt)].sort((a, b) => a - b);
 
     let joins = 0;
     let smooth = 0;

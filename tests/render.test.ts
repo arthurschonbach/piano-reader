@@ -69,21 +69,17 @@ draw(generateExercise(LESSONS.find((l) => l.id === 'sol-majeur')!, { seed: 2 }),
 ok(stats().ink > 0.02, 'G major grand staff renders');
 writeFileSync(new URL('./out-grand.png', import.meta.url), canvas.toBuffer('image/png'));
 
-// Duration lines: green when held long enough, red for what's missing when let go early.
+// A label on notes held the wrong length: "court" in red, "long" in amber.
 const held = generateExercise(LESSONS.find((l) => l.id === 'en-rythme')!, { seed: 4 });
-const longs = held.measures.flatMap((m) => m.notes).filter((n) => !n.rest && n.dur >= 2).slice(0, 2);
-ok(longs.length === 2, 'two long notes to hold');
+const firstNotes = held.measures[0].notes.filter((n) => !n.rest);
 draw(held, 0, undefined, { pxPerBeat: 9 });
-const plainInk = stats();
-draw(held, 0, undefined, { pxPerBeat: 9, durations: true });
-ok(stats().ink > plainInk.ink, 'duration guides drawn');
-const holdMap = new Map([[longs[0], { held: longs[0].dur, state: 'ok' as const }], [longs[1], { held: 0.4, state: 'short' as const }]]);
-draw(held, longs[0].beat, undefined, { pxPerBeat: 9, holds: holdMap });
-ok(stats().green > 0.0005, `held long enough: green line (${(stats().green * 100).toFixed(2)}%)`);
-draw(held, longs[1].beat, undefined, { pxPerBeat: 9, holds: holdMap });
-const hc = stats();
-ok(hc.red > 0.0003 && hc.orange > 0.0001, `let go early: amber part held, red part missing (${(hc.orange * 100).toFixed(2)}% / ${(hc.red * 100).toFixed(2)}%)`);
+const noFlags = stats();
+draw(held, 0, undefined, { pxPerBeat: 9, holdFlags: new Map([[firstNotes[0], 'short' as const]]) });
+const shortFlag = stats();
+ok(shortFlag.red > noFlags.red + 0.0005, `"court" label in red (${(shortFlag.red * 100).toFixed(2)}%)`);
 writeFileSync(new URL('./out-holds.png', import.meta.url), canvas.toBuffer('image/png'));
+draw(held, 0, undefined, { pxPerBeat: 9, holdFlags: new Map([[firstNotes[0], 'long' as const]]) });
+ok(stats().orange > noFlags.orange + 0.0005, '"long" label in amber');
 
 const piece = pieceScore(PIECES[2], 'both');
 draw(piece, 0, undefined, { fingers: false });

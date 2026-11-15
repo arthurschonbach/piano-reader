@@ -4,49 +4,46 @@ import type { NoteItem, Score } from './model';
 /** Everything that changes the picture, except the scroll position. */
 export type ViewOptions = Omit<DrawState, 'beat' | 'sp' | 'stateBeat' | 'pin' | 'fitBeats' | 'anchor'> & { anchor: number };
 
-interface Tile {
-  canvas: HTMLCanvasElement;
-  renderer: ScoreRenderer;
-  index: number;
-  dirty: boolean;
-}
-
-/** Tile width in CSS pixels. A small pool of canvases is recycled along the score. */
-const TILE_W = 768;
-const POOL = 6;
+/** Browsers refuse canvases past these sizes (iOS: 16 M pixels, 16384 px a side). */
+const MAX_SIDE = 16000;
+const MAX_AREA = 15_000_000;
 
 /**
  * A scrolling score that moves at the screen's own refresh rate.
  *
- * The music is drawn once into tiles sitting side by side in a wide "strip"
- * element. Moving the score is a CSS transform on that strip, animated by the
- * browser's compositor (Web Animations): it doesn't depend on the page's
- * frame rate, which in-app browsers on iPad cap at 60 or even 30 fps.
- * The page only repaints a tile when something on it changes, and keeps the
- * tiles around the visible area ready. The cursor and the pinned clefs live
- * on a fixed overlay canvas above the strip.
+ * The whole exercise is drawn once into a single wide canvas (the "strip").
+ * Moving the score is a CSS transform on it, animated by the browser's
+ * compositor (Web Animations): it doesn't depend on the page's frame rate,
+ * which in-app browsers on iPad cap at 60 or even 30 fps. When a note changes
+ * (colour, a mark), only a narrow band around it is repainted. The cursor and
+ * the pinned clefs live on a fixed overlay canvas above the strip.
  */
 export class ScrollStrip {
-  private strip: HTMLDivElement;
+  private strip: HTMLCanvasElement;
+  private stripR: ScoreRenderer;
   private overlayCanvas: HTMLCanvasElement;
-  /** Curtain over the notes about to be played (look-ahead practice). */
-  private mask: HTMLDivElement;
-  private maskBeats = 0;
   private overlay: ScoreRenderer;
   private probe: ScoreRenderer;
-  private tiles: Tile[] = [];
   private w = 0;
   private h = 0;
   private geo: { SP: number; lead: number; pxQ: number; anchorX: number } | null = null;
   private anim: Animation | null = null;
   private pinState = '';
   private overlayDirty = true;
+  /** The whole strip needs painting (new size, theme, options). */
+  private fullDirty = true;
+  /** Bands to repaint, in strip CSS px. */
+  private dirty: [number, number][] = [];
   /** Beat the strip shows (or is gliding to) when not playing. */
   private restBeat = 0;
+  /** Curtain over the notes about to be played (look-ahead practice). */
+  private mask: HTMLDivElement;
+  private maskBeats = 0;
 
   constructor(stage: HTMLElement, private score: Score, private opts: ViewOptions) {
-    this.strip = document.createElement('div');
+    this.strip = document.createElement('canvas');
     this.strip.className = 'strip';
+    this.stripR = new ScoreRenderer(this.strip);
     this.overlayCanvas = document.createElement('canvas');
     this.overlayCanvas.className = 'strip-overlay';
     this.mask = document.createElement('div');
@@ -66,15 +63,45 @@ export class ScrollStrip {
     this.probe.resize(w, h);
     this.geo = this.probe.layout(this.score, { ...this.opts, beat: 0 });
     this.overlay.resize(w, h);
+    // Room for every beat, plus a screen's width so the end can scroll to the cursor.
+    const { lead, pxQ } = this.geo;
+    const last = this.score.measures[this.score.measures.length - 1];
+    const sw = Math.ceil(lead + (last ? last.startBeat + last.length : 0) * pxQ + w + 40);
+    const scale = Math.min(3, MAX_SIDE / sw, Math.sqrt(MAX_AREA / (sw * h)));
+    this.stripR.resize(sw, h, scale);
+    this.strip.style.width = `${sw}px`;
     this.strip.style.height = `${h}px`;
-    for (const t of this.tiles) {
-      t.renderer.resize(TILE_W, h);
-      t.canvas.style.height = `${h}px`;
-      t.dirty = true;
-    }
+    this.fullDirty = true;
     this.overlayDirty = true;
     this.layoutMask();
     if (!this.anim) this.place(this.restBeat, false);
+  }
+
+  setOptions(o: Partial<ViewOptions>): void {
+    this.opts = { ...this.opts, ...o };
+    this.invalidateAll();
+  }
+
+  invalidateAll(): void {
+    this.fullDirty = true;
+    this.overlayDirty = true;
+  }
+
+  /** Something changed on these notes (colour, label): repaint around them. */
+  invalidateNotes(notes: Iterable<NoteItem>): void {
+    if (!this.geo) return;
+    const { lead, pxQ, SP } = this.geo;
+    for (const n of notes) {
+      const x = lead + n.beat * pxQ;
+      this.dirty.push([x - 4 * SP, x + 5 * SP]);
+    }
+  }
+
+  /** Repaint everything between two beats. */
+  invalidateSpan(fromBeat: number, toBeat: number): void {
+    if (!this.geo) return;
+    const { lead, pxQ, SP } = this.geo;
+    this.dirty.push([lead + fromBeat * pxQ - 4 * SP, lead + toBeat * pxQ + 5 * SP]);
   }
 
   /**
@@ -105,42 +132,6 @@ export class ScrollStrip {
     const left = noteX - 1.6 * SP;
     this.mask.style.left = `${left}px`;
     this.mask.style.width = `${Math.max(SP, noteX + this.maskBeats * pxQ - 1.7 * SP - left)}px`;
-  }
-
-  setOptions(o: Partial<ViewOptions>): void {
-    this.opts = { ...this.opts, ...o };
-    this.invalidateAll();
-  }
-
-  invalidateAll(): void {
-    for (const t of this.tiles) t.dirty = true;
-    this.overlayDirty = true;
-  }
-
-  /** Something changed on these notes (colour, label): redraw the tiles they sit on. */
-  invalidateNotes(notes: Iterable<NoteItem>): void {
-    if (!this.geo) return;
-    const { lead, pxQ, SP } = this.geo;
-    const margin = 4 * SP;
-    for (const n of notes) {
-      const x = lead + n.beat * pxQ;
-      for (const t of this.tiles) {
-        const x0 = t.index * TILE_W;
-        if (x + margin >= x0 && x - margin <= x0 + TILE_W) t.dirty = true;
-      }
-    }
-  }
-
-  /** Redraw the tiles between two beats (a note's duration line). */
-  invalidateSpan(fromBeat: number, toBeat: number): void {
-    if (!this.geo) return;
-    const { lead, pxQ, SP } = this.geo;
-    const x0 = lead + fromBeat * pxQ - 4 * SP;
-    const x1 = lead + toBeat * pxQ + 4 * SP;
-    for (const t of this.tiles) {
-      const t0 = t.index * TILE_W;
-      if (x1 >= t0 && x0 <= t0 + TILE_W) t.dirty = true;
-    }
   }
 
   private offset(beat: number): number {
@@ -179,63 +170,46 @@ export class ScrollStrip {
     this.anim = null;
   }
 
-  private tile(index: number): Tile {
-    let t = this.tiles.find((x) => x.index === index);
-    if (t) return t;
-    if (this.tiles.length < POOL) {
-      const canvas = document.createElement('canvas');
-      canvas.className = 'strip-tile';
-      canvas.style.width = `${TILE_W}px`;
-      canvas.style.height = `${this.h}px`;
-      this.strip.append(canvas);
-      const renderer = new ScoreRenderer(canvas);
-      renderer.resize(TILE_W, this.h);
-      t = { canvas, renderer, index, dirty: true };
-      this.tiles.push(t);
-    } else {
-      // Recycle the tile farthest from the one we need.
-      t = this.tiles.reduce((a, b) => (Math.abs(a.index - index) >= Math.abs(b.index - index) ? a : b));
-      t.index = index;
-      t.dirty = true;
-    }
-    t.canvas.style.left = `${index * TILE_W}px`;
-    return t;
-  }
-
-  private paint(t: Tile): void {
+  private paint(region?: [number, number]): void {
     if (!this.geo) return;
-    t.renderer.draw(this.score, {
+    this.stripR.draw(this.score, {
       ...this.opts,
-      beat: (t.index * TILE_W) / this.geo.pxQ,
+      beat: 0,
       anchor: 0,
       sp: this.geo.SP,
       stateBeat: -1e9,
       pin: false,
-      cursor: false
+      cursor: false,
+      region
     });
-    t.dirty = false;
   }
 
   /**
-   * Call every frame with the current beat. Keeps the tiles around the view
-   * painted (at most two per frame) and the overlay up to date.
-   * `manual` moves the strip from here (no Web Animations support).
+   * Call every frame with the current beat. Repaints what changed on the
+   * strip and keeps the overlay up to date. `manual` moves the strip from
+   * here (no Web Animations support).
    */
   update(beat: number, manual = false): void {
     if (!this.geo || this.w < 2) return;
-    const off = this.offset(beat);
-    const firstVisible = Math.max(0, Math.floor(-off / TILE_W));
-    const lastVisible = Math.max(0, Math.floor((this.w - off) / TILE_W));
-    // Visible tiles first, then the next one, then the previous one.
-    const order: number[] = [];
-    for (let k = firstVisible; k <= lastVisible; k++) order.push(k);
-    order.push(lastVisible + 1);
-    if (firstVisible > 0) order.push(firstVisible - 1);
-    let budget = 2;
-    for (const k of order) {
-      const t = this.tile(k);
-      if (t.dirty && budget-- > 0) this.paint(t);
+    if (this.fullDirty) {
+      this.fullDirty = false;
+      this.dirty = [];
+      this.paint();
+    } else if (this.dirty.length) {
+      // Merge overlapping bands, then repaint each one.
+      const bands = this.dirty.sort((a, b) => a[0] - b[0]);
+      this.dirty = [];
+      let [a, b] = bands[0];
+      for (const [x0, x1] of bands.slice(1)) {
+        if (x0 <= b) b = Math.max(b, x1);
+        else {
+          this.paint([a, b]);
+          [a, b] = [x0, x1];
+        }
+      }
+      this.paint([a, b]);
     }
+    const off = this.offset(beat);
     if (manual && !this.anim) this.strip.style.transform = `translate3d(${off}px, 0, 0)`;
 
     // Pinned clefs show once bar 1 has gone; their key follows the current bar.

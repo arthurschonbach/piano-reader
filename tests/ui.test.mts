@@ -140,9 +140,9 @@ const startExercise = async (page: Page) => {
     const a = new DOMMatrix(getComputedStyle(strip).transform).m41;
     await new Promise((r) => setTimeout(r, 500));
     const b = new DOMMatrix(getComputedStyle(strip).transform).m41;
-    return { anims: strip.getAnimations().length, moved: a - b, tiles: document.querySelectorAll('.strip-tile').length };
-  })()`)) as { anims: number; moved: number; tiles: number };
-  ok(scroll.anims === 1 && scroll.moved > 20 && scroll.tiles >= 2, `rhythm: score scrolls by animation (${JSON.stringify(scroll)})`);
+    return { anims: strip.getAnimations().length, moved: a - b, canvases: document.querySelectorAll('.stage canvas.strip').length, wide: strip.getBoundingClientRect().width > innerWidth };
+  })()`)) as { anims: number; moved: number; canvases: number; wide: boolean };
+  ok(scroll.anims === 1 && scroll.moved > 20 && scroll.canvases === 1 && scroll.wide, `rhythm: one score canvas, slid by animation (${JSON.stringify(scroll)})`);
   await page.waitForSelector('.results', { timeout: 60000 });
   const rr = await page.textContent('.results');
   ok(!!rr && rr.includes('Séance validée'), `rhythm lesson validated when played in time (${rr?.slice(0, 80)})`);
@@ -185,7 +185,7 @@ const startExercise = async (page: Page) => {
   await page.goto('http://localhost:5199/#/lecon/en-rythme');
   await startExercise(page);
   await page.evaluate(() => (window as unknown as { __playEarly: () => void }).__playEarly());
-  await page.waitForFunction(() => document.querySelector('.feedback')?.textContent?.startsWith('Lâchée trop tôt'), null, { timeout: 30000 });
+  await page.waitForFunction(() => document.querySelector('.feedback')?.textContent?.startsWith('Trop court'), null, { timeout: 30000 });
   ok(true, `hold: early release told while playing (${await page.textContent('.feedback')})`);
   await page.waitForSelector('.results', { timeout: 60000 });
   const er2 = await page.textContent('.results');

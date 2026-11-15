@@ -15,7 +15,7 @@ import {
   recordDrill, recordEar, recordPractice, setPieceWeak, streak, validatedDays, weakestNotes, weaknessMap, type SessionMetrics
 } from '../src/progress/store';
 import { dynamicsByMeasure, noteName, makeNote, spellOfMidi, type Score } from '../src/core/model';
-import { holdDeadline, summarizeTouch, type TouchNote } from '../src/exercise/touch';
+import { holdDeadline, holdVerdict, summarizeTouch, type TouchNote } from '../src/exercise/touch';
 import { beatsText } from '../src/ui/player';
 
 let fails = 0;
@@ -87,6 +87,8 @@ ok(rs.hits === 3 && rs.missed === 1 && Math.abs(rs.accuracy - 0.75) < 1e-9, 'rhy
 
 // --- Hold deadline and how lengths are said ---
 ok(holdDeadline(0, 2, 1000) === 1.5 && Math.abs(holdDeadline(0, 0.5, 1000) - 0.35) < 1e-9, 'hold: a quarter of the length, at least 150 ms, may be cut');
+ok(holdVerdict(0, 2, 1.2, 1000, true) === 'short' && holdVerdict(0, 2, 1.9, 1000, true) === 'ok' && holdVerdict(0, 2, 2.4, 1000, true) === 'ok' && holdVerdict(0, 2, 2.7, 1000, true) === 'long', 'hold: short, right, a little over, too long');
+ok(holdVerdict(0, 2, 5, 1000, false) === 'ok', 'hold: the last note may be held as long as you like');
 ok(beatsText(1.5) === '1 temps ½' && beatsText(2) === '2 temps' && beatsText(0.5) === '½ temps' && beatsText(0.74) === '¾ temps', 'hold: lengths in words');
 
 // --- Touch: key releases and velocity ---
@@ -109,6 +111,8 @@ const tsum = summarizeTouch(rel.targets.map(tnOf), { msPerBeat: 1000 });
 ok(tsum.heldJudged === 4 && Math.abs(tsum.held! - 0.75) < 1e-9 && tsum.shortAt.join() === '1', 'touch: a quarter released at 40% is too short, the others are held');
 const line = (offs: number[]): TouchNote[] => [60, 62, 64, 65, 67].map((m, i) => ({ midi: m, staff: 0, chord: false, velocity: 64, start: i, end: i + 1, on: i, off: offs[i] }));
 ok(summarizeTouch(line([1, 2, 3, 4, 5]), { msPerBeat: 500 }).legato === 1, 'touch: releases on the next note are legato');
+const longLine = summarizeTouch(line([1.6, 2, 3, 4, 5]), { msPerBeat: 500 });
+ok(longLine.longAt.join() === '0', 'hold: a note held into the next one is listed as too long');
 ok(summarizeTouch(line([0.6, 1.6, 2.6, 3.6, 4.6]), { msPerBeat: 500 }).legato === 0, 'touch: 200 ms gaps are not legato');
 const dynNotes: TouchNote[] = [40, 44, 42, 46].map((v): TouchNote => ({ midi: 60, staff: 0, chord: false, velocity: v, dyn: 'p' }))
   .concat([80, 86, 84, 90].map((v): TouchNote => ({ midi: 60, staff: 0, chord: false, velocity: v, dyn: 'f' })));

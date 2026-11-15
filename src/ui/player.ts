@@ -1,8 +1,8 @@
 import { ClickTrack } from '../core/audio';
-import { HOLD_LINE_MIN, type Hold, type Mark } from '../core/engraver';
+import type { HoldFlag, Mark } from '../core/engraver';
 import { ScrollStrip } from '../core/scroller';
 import { dynamicsByMeasure, measureAt, noteName, spellOfMidi, type NoteItem, type Score } from '../core/model';
-import { holdDeadline, summarizeTouch, type TouchNote, type TouchSummary } from '../exercise/touch';
+import { holdVerdict, summarizeTouch, type TouchNote, type TouchSummary } from '../exercise/touch';
 import { buildSteps, summarize, WaitSession, type StepResult, type Summary } from '../exercise/wait';
 import { buildTargets, RhythmSession, summarizeRhythm, WINDOWS, type RhythmSummary, type Target } from '../exercise/rhythm';
 import { mountKeyboard } from '../input/keyboard';
@@ -100,17 +100,14 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     labels.add(n);
     sv.invalidateNotes([n]);
   };
-  // Rhythm mode: how long each played note has been held, drawn as a line after it.
-  const holds = new Map<NoteItem, Hold>();
+  // Rhythm mode: keys held down, and the notes held the wrong length (a label on the note).
+  const holdFlags = new Map<NoteItem, HoldFlag>();
   const holding = new Map<number, Target>();
-  const setHold = (n: NoteItem, h: Hold) => {
-    holds.set(n, h);
-    sv.invalidateSpan(n.beat, n.tieEnd);
-  };
+  const lastOfStaff = new Set<Target>();
   const clearMarks = () => {
     marks.clear();
     labels.clear();
-    holds.clear();
+    holdFlags.clear();
     holding.clear();
     sv.invalidateAll();
   };
@@ -159,13 +156,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
       app.setSettings({ ...app.settings, metronome: !app.settings.metronome });
       metroBtn!.classList.toggle('on', app.settings.metronome);
     });
-    const durBtn = button('Durées', `btn toggle${app.settings.durations ? ' on' : ''}`, () => {
-      app.setSettings({ ...app.settings, durations: !app.settings.durations });
-      durBtn.classList.toggle('on', app.settings.durations);
-      sv.setOptions({ durations: app.settings.durations });
-    });
-    durBtn.title = 'Une ligne après chaque note longue montre jusqu’où la tenir. Elle se remplit pendant que tu tiens la touche.';
-    tools.append(metroBtn, durBtn, button('Recommencer', 'btn', () => restart()));
+    tools.append(metroBtn, button('Recommencer', 'btn', () => restart()));
   }
   const source = h('span', 'source');
   tools.append(source, navSlot, h('span', 'portrait-hint', 'Astuce : tourne l’écran en paysage.'));
@@ -237,8 +228,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     fingers: cfg.fingers !== false,
     marks,
     labels,
-    holds,
-    durations: mode === 'rhythm' && app.settings.durations
+    holdFlags
   });
   const lastBeat = mode === 'rhythm' ? Math.max(...buildTargets(score).map((t) => t.beat)) : 0;
   /** Rhythm mode: the last note's written end, so a final long note is held to the end. */
@@ -247,7 +237,6 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
   const endBeat = lastBeat + 4;
   let raf = 0;
   let viewBeat = 0;
-  let lastHoldPaint = 0;
   let badTimer = 0;
   let releaseWake: (() => void) | null = null;
   let finished = false;
@@ -317,6 +306,13 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
       const countIn = bpb + (pickup ? bpb - pickup : 0);
       t0 = performance.now() + countIn * msPerBeat + 120;
       rhythm = new RhythmSession(buildTargets(score), msPerBeat);
+      // The last note of each hand can't be held "too long": nothing follows it.
+      lastOfStaff.clear();
+      for (const st of new Set(rhythm.targets.map((t) => t.note.staff))) {
+        const mine = rhythm.targets.filter((t) => t.note.staff === st);
+        const lastBeat = Math.max(...mine.map((t) => t.beat));
+        for (const t of mine) if (t.beat === lastBeat) lastOfStaff.add(t);
+      }
       clicks = new ClickTrack(app.metronome, t0, msPerBeat * unit, -countIn / unit, bpb / unit, pickup / unit);
       // The score scrolls on the compositor, in step with the clock the clicks use.
       sv.play(-countIn, t0 - countIn * msPerBeat, msPerBeat, endBeat);
@@ -412,10 +408,18 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
         if (t) {
           holding.delete(e.midi);
           const n = t.note;
-          const len = n.tieEnd - n.beat;
-          const ok = beat >= holdDeadline(n.beat, n.tieEnd, msPerBeat) - 1e-9;
-          setHold(n, { held: Math.min(len, Math.max(0, beat - n.beat)), state: ok ? 'ok' : 'short' });
-          if (!ok) setFeedback(`Lâchée trop tôt : tenue ${beatsText(beat - n.beat)} sur ${beatsText(len)}`, 'bad');
+          const verdict = holdVerdict(n.beat, n.tieEnd, beat, msPerBeat, !lastOfStaff.has(t));
+          if (verdict !== 'ok') {
+            holdFlags.set(n, verdict);
+            sv.invalidateNotes([n]);
+            const len = n.tieEnd - n.beat;
+            setFeedback(
+              verdict === 'short'
+                ? `Trop court : tenue ${beatsText(beat - n.beat)} sur ${beatsText(len)}`
+                : `Trop long : déborde de ${beatsText(beat - n.tieEnd)} sur la note suivante`,
+              'bad'
+            );
+          }
         }
       }
       return;
@@ -465,11 +469,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
       const hit = rhythm.noteOn(e.midi, beat, e.velocity);
       if (hit.kind === 'hit') {
         judged++;
-        const n = hit.target.note;
-        if (n.tieEnd - n.beat >= HOLD_LINE_MIN - 1e-9) {
-          holding.set(e.midi, hit.target);
-          setHold(n, { held: 0, state: 'holding' });
-        }
+        holding.set(e.midi, hit.target);
         setMark(hit.target.note, hit.grade === 'perfect' ? 'ok' : 'late');
         const a = Math.round(hit.dtMs);
         setFeedback(hit.grade === 'perfect' ? '✓' : a < 0 ? 'un peu en avance' : 'un peu en retard', hit.grade === 'perfect' ? 'good' : '');
@@ -554,22 +554,9 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
       }
       setCount(`${judged} / ${rhythm.targets.length}`);
       if (hasDyn && sawVelocity) reportDynamics(viewBeat);
-      // Grow the lines of the notes being held, a few times a second (each update repaints a tile).
-      if (holding.size && now - lastHoldPaint > 110) {
-        lastHoldPaint = now;
-        const b = viewBeat - app.settings.latencyMs / msPerBeat;
-        for (const t of holding.values()) {
-          const n = t.note;
-          const len = n.tieEnd - n.beat;
-          const ok = b >= holdDeadline(n.beat, n.tieEnd, msPerBeat);
-          const was = holds.get(n)?.state;
-          setHold(n, { held: Math.min(len, Math.max(0, b - n.beat)), state: ok ? 'ok' : 'holding' });
-          if (ok && was !== 'ok' && len >= 2) setFeedback('✓ tenue', 'good');
-        }
-      }
       if (viewBeat > Math.max(lastBeat + WINDOWS.max / msPerBeat + 1.5, lastEnd + 0.25)) finish(false);
     }
-    // Only tile upkeep here; the movement itself is done by the compositor.
+    // Only repaints of changed notes here; the movement itself is done by the compositor.
     sv.update(viewBeat);
   };
   raf = requestAnimationFrame(frame);

@@ -168,23 +168,13 @@ export interface DrawState {
   fingers?: boolean;
   /** Notes whose name is shown even when `names` is off (hints). */
   labels?: ReadonlySet<NoteItem>;
-  /** How long each played note has been held (rhythm mode). */
-  holds?: ReadonlyMap<NoteItem, Hold>;
-  /** Faint line after each note of a beat or more, showing how long to hold it. */
-  durations?: boolean;
+  /** Notes let go too early ("short") or held into the next one ("long"). */
+  holdFlags?: ReadonlyMap<NoteItem, HoldFlag>;
+  /** Repaint only this horizontal band (CSS px), leaving the rest of the canvas as it is. */
+  region?: [number, number];
 }
 
-/**
- * A note's hold, in beats from its written start. "holding": key still down;
- * "ok": held long enough; "short": let go too early.
- */
-export interface Hold {
-  held: number;
-  state: 'holding' | 'ok' | 'short';
-}
-
-/** Notes this long or longer (in beats) get a duration line. */
-export const HOLD_LINE_MIN = 1;
+export type HoldFlag = 'short' | 'long';
 
 export interface ViewGeom {
   anchorX: number;
@@ -256,10 +246,11 @@ export class ScoreRenderer {
     return currentBeat + (xCss - anchorX - lead) / pxQ;
   }
 
-  resize(w: number, h: number): void {
+  /** `maxScale` caps the pixel density (a very wide canvas must stay within browser limits). */
+  resize(w: number, h: number, maxScale = 2): void {
     // Resizing a canvas reallocates it: skip when nothing changed.
     if (Math.abs(w - this.w) < 0.5 && Math.abs(h - this.h) < 0.5) return;
-    const dpr = Math.min(2, (typeof window !== 'undefined' && window.devicePixelRatio) || 1);
+    const dpr = Math.min(maxScale, (typeof window !== 'undefined' && window.devicePixelRatio) || 1);
     this.canvas.width = Math.max(1, Math.round(w * dpr));
     this.canvas.height = Math.max(1, Math.round(h * dpr));
     this.w = w;
@@ -339,15 +330,21 @@ export class ScoreRenderer {
     VCTX = this.vctx;
     RAW = ctx;
     if (w < 2 || h < 2) return;
-    ctx.clearRect(0, 0, w, h);
+    const [rx0, rx1] = s.region ?? [0, w];
+    ctx.save();
+    if (s.region) {
+      ctx.beginPath();
+      ctx.rect(rx0, 0, rx1 - rx0, h);
+      ctx.clip();
+    }
     ctx.fillStyle = P.paper;
-    ctx.fillRect(0, 0, w, h);
+    ctx.fillRect(rx0, 0, rx1 - rx0, h);
 
     const g = this.geom(score, s);
     const { U, single, SP, trebleTop, trebleBottom, bassBottom, staffTop, staffBottom, bottomIdx, yIdxFor, lead, pxQ, anchorX, xOf } = g;
 
-    const leftBeat = s.beat - (anchorX + lead) / pxQ;
-    const rightBeat = s.beat + (w - anchorX - lead) / pxQ;
+    const leftBeat = s.beat + (rx0 - anchorX - lead) / pxQ;
+    const rightBeat = s.beat + (rx1 - anchorX - lead) / pxQ;
     const mi0 = Math.max(0, measureAt(score, leftBeat) - 1);
     const visible: number[] = [];
     for (let i = mi0; i < score.measures.length; i++) {
@@ -445,8 +442,7 @@ export class ScoreRenderer {
         for (const v of voices) {
           drawStream(ctx, list.filter((c) => c.voice === v), {
             st, SP, staffTop, staffBottom, bottomIdx, yIdx: yIdxFor(st), midIdx: bottomIdx[st] + 8,
-            acc, fingers: s.fingers !== false, beamUnit, barStart: m.startBeat,
-            noteX: (b: number) => xOf(b) + pad, holds: s.holds, durations: !!s.durations
+            acc, fingers: s.fingers !== false, beamUnit, barStart: m.startBeat, holdFlags: s.holdFlags
           });
         }
       }
@@ -494,6 +490,7 @@ export class ScoreRenderer {
     }
 
     this.overlay(score, s, g);
+    ctx.restore();
   }
 
   private overlay(score: Score, s: DrawState, g: ReturnType<ScoreRenderer['geom']>): void {
@@ -674,10 +671,7 @@ interface StreamEnv {
   midIdx: number;
   acc: Map<number, number>;
   fingers: boolean;
-  /** Screen x of a note head at a beat. */
-  noteX: (beat: number) => number;
-  holds?: ReadonlyMap<NoteItem, Hold>;
-  durations: boolean;
+  holdFlags?: ReadonlyMap<NoteItem, HoldFlag>;
   /** Beams group notes within this many beats from the bar start (1, or 1.5 in 6/8). */
   beamUnit: number;
   barStart: number;
@@ -722,9 +716,6 @@ function drawStream(ctx: CanvasRenderingContext2D, list: Cluster[], e: StreamEnv
       const em = 4 * SP * (c.grace ? 0.72 : 1);
       const code = c.base >= 4 ? 'noteheadWhole' : c.base >= 2 ? 'noteheadHalf' : 'noteheadBlack';
       const hw = gbox(code, em).w;
-      if (!c.grace && !n.tieStop && n.tieEnd - n.beat >= HOLD_LINE_MIN - 1e-9) drawHoldLine(ctx, n, c.x + hw + (n.dots ? 1.2 : 0.35) * SP, y, e);
-      ctx.strokeStyle = color;
-      ctx.fillStyle = color;
       for (let L = bIdx + 10; L <= idx; L += 2) drawLedger(ctx, c.x, yIdx(L), SP, hw);
       for (let L = bIdx - 2; L >= idx; L -= 2) drawLedger(ctx, c.x, yIdx(L), SP, hw);
       const gx = c.grace ? c.x - 1.4 * SP : c.x;
@@ -786,46 +777,57 @@ function drawStream(ctx: CanvasRenderingContext2D, list: Cluster[], e: StreamEnv
   }
 
   for (const g of beamed) drawBeamGroup(ctx, g, e);
+  if (e.holdFlags?.size) {
+    for (const c of list) {
+      const flag = c.members.map((n) => e.holdFlags!.get(n)).find((f) => f);
+      if (flag && !c.rest) drawHoldFlag(ctx, c, flag, e);
+    }
+  }
 }
 
 /**
- * The line after a note that shows how long to hold it: faint and dashed as a
- * guide, filled while the key is down (amber, then green once long enough),
- * and red for the part missing when the key was let go too early.
+ * A small label on a note held the wrong length: "court" (let go too early,
+ * red) or "long" (held into the next note, amber). Above the treble staff,
+ * below the bass staff, so the two hands don't mix.
  */
-function drawHoldLine(ctx: CanvasRenderingContext2D, n: NoteItem, x0: number, y: number, e: StreamEnv): void {
-  const hold = e.holds?.get(n);
-  if (!hold && !e.durations) return;
-  const { SP } = e;
-  const x1 = e.noteX(n.tieEnd) - 0.55 * SP;
-  if (x1 - x0 < 0.5 * SP) return;
-  const xh = hold ? Math.min(x1, Math.max(x0, e.noteX(n.beat + hold.held) - 0.2 * SP)) : x0;
+function drawHoldFlag(ctx: CanvasRenderingContext2D, c: Cluster, flag: HoldFlag, e: StreamEnv): void {
+  const { SP, st } = e;
+  const headW = gbox('noteheadBlack', 4 * SP).w;
+  const ys = c.members.map((n) => e.yIdx(idxOf(n)));
+  const above = st === 0;
+  const text = flag === 'short' ? 'court' : 'long';
+  const color = flag === 'short' ? P.bad : P.late;
   ctx.save();
-  ctx.lineCap = 'round';
-  // What's left to hold (or the guide).
-  if (!hold || hold.state !== 'ok') {
-    const missed = hold?.state === 'short';
-    if (missed || e.durations) {
-      ctx.strokeStyle = missed ? P.bad : P.rest;
-      ctx.globalAlpha = missed ? 0.9 : 0.45;
-      ctx.lineWidth = missed ? 0.3 * SP : 0.22 * SP;
-      ctx.setLineDash(missed ? [] : [0.5 * SP, 0.5 * SP]);
-      ctx.beginPath();
-      ctx.moveTo(xh, y);
-      ctx.lineTo(x1, y);
-      ctx.stroke();
-    }
-  }
-  if (hold) {
-    ctx.setLineDash([]);
-    ctx.globalAlpha = 1;
-    ctx.strokeStyle = hold.state === 'ok' ? P.good : P.late;
-    ctx.lineWidth = 0.45 * SP;
-    ctx.beginPath();
-    ctx.moveTo(x0, y);
-    ctx.lineTo(hold.state === 'ok' && hold.held >= n.tieEnd - n.beat - 1e-9 ? x1 : xh, y);
-    ctx.stroke();
-  }
+  ctx.font = `700 ${0.95 * SP}px system-ui, sans-serif`;
+  const tw = ctx.measureText(text).width;
+  const pw = tw + 1.1 * SP;
+  const ph = 1.55 * SP;
+  const cx = c.x + headW / 2;
+  // Clear of the bar number printed just above the treble staff.
+  const cy = above ? Math.min(e.staffTop[st] - 0.8 * SP, ...ys) - 1.7 * SP : Math.max(e.staffBottom[st], ...ys) + 1.6 * SP;
+  const x = cx - pw / 2;
+  const y = cy - ph / 2;
+  const r = ph / 2;
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + pw, y, x + pw, y + ph, r);
+  ctx.arcTo(x + pw, y + ph, x, y + ph, r);
+  ctx.arcTo(x, y + ph, x, y, r);
+  ctx.arcTo(x, y, x + pw, y, r);
+  ctx.closePath();
+  ctx.fillStyle = P.paper;
+  ctx.fill();
+  ctx.globalAlpha = 0.16;
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, cx, cy + 0.05 * SP);
   ctx.restore();
 }
 

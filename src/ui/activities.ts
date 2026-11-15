@@ -62,6 +62,10 @@ function touchNotes(o: Outcome): string[] {
     const bars = [...new Set(t.shortAt.map((b) => Math.floor(b / 4) + 1))].slice(0, 4);
     out.push(`Notes lâchées trop tôt (mesure${bars.length > 1 ? 's' : ''} ${bars.join(', ')}) : garde la touche enfoncée jusqu’au temps suivant, surtout sur les blanches et les rondes.`);
   }
+  if (t.longAt.length >= 2) {
+    const bars = [...new Set(t.longAt.map((b) => Math.floor(b / 4) + 1))].slice(0, 4);
+    out.push(`Notes tenues trop longtemps (mesure${bars.length > 1 ? 's' : ''} ${bars.join(', ')}) : elles débordent sur la suivante. Lâche la touche au moment où tu joues la note d’après.`);
+  }
   if (t.legato !== undefined) {
     if (t.legato < 0.7) out.push(`Legato : ${percent(t.legato)} des enchaînements sans trou. Lâche une touche au moment précis où tu enfonces la suivante.`);
     else if (t.legato >= 0.9) out.push(`Legato : ${percent(t.legato)} des enchaînements sans trou, bien lié.`);
