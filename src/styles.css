@@ -1,4 +1,6 @@
 :root {
+  /* Kept free for the browser's own button in the top-left corner (iPad full screen). */
+  --corner-gap: 64px;
   --paper: #fbfaf7;
   --ink: #201b13;
   --muted: #645d52;
@@ -89,7 +91,10 @@ button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent);
 .note { color: var(--muted); font-size: 0.92rem; }
 .setup { font-weight: 600; line-height: 1.45; }
 
-.home-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.home-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 16px; padding-top: 28px; }
+@media (max-width: 760px) {
+  .home-head { padding-left: calc(var(--corner-gap) - 16px); }
+}
 .head-btns { display: flex; gap: 6px; }
 
 .piano-status {
@@ -141,12 +146,13 @@ button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent);
 
 /* ---------- Top bar (inner screens) ---------- */
 .topbar {
-  display: flex; align-items: center; gap: 8px; padding: 4px 8px;
+  display: flex; align-items: center; gap: 8px; padding: 4px 8px 4px var(--corner-gap);
   padding-top: max(4px, env(safe-area-inset-top));
   border-bottom: 1px solid var(--line); background: var(--paper);
-  position: sticky; top: 0; z-index: 5;
+  /* Above the intro/results card, so Retour is always reachable. */
+  position: sticky; top: 0; z-index: 20;
 }
-.topbar .back { font-size: 1.4rem; padding: 4px 12px; }
+.topbar .back { min-height: 40px; padding: 6px 14px; }
 .tb-title { flex: 1; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 0.95rem; }
 .tb-step { color: var(--muted); font-weight: 500; }
 .count { font-variant-numeric: tabular-nums; color: var(--muted); padding: 0 6px; white-space: nowrap; }

@@ -102,11 +102,13 @@ export function resultCard(o: { title: string; stats: StatLine[]; notes?: string
 
 /** Top bar used by every inner screen. */
 export function topBar(app: App, title: string, onBack: () => void, extra?: HTMLElement): HTMLElement {
+  // Buttons sit on the right: the top-left corner is where full-screen
+  // browsers on iPad put their own "exit full screen" button.
   const bar = h('header', 'topbar');
-  const back = button('‹', 'btn quiet back', onBack);
+  const back = button('Retour', 'btn back', onBack);
   back.setAttribute('aria-label', 'Retour');
-  bar.append(back, h('div', 'tb-title', title));
+  bar.append(h('div', 'tb-title', title));
   if (extra) bar.append(extra);
-  bar.append(themeButton(app));
+  bar.append(themeButton(app), back);
   return bar;
 }
