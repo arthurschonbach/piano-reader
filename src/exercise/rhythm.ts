@@ -12,6 +12,11 @@ export interface Target {
   grade?: Grade;
   /** Played minus written time, ms (negative = early). */
   dtMs?: number;
+  /** Key velocity when it was hit (1–127). */
+  velocity?: number;
+  /** When the key was pressed and released, in beats. */
+  onBeat?: number;
+  offBeat?: number;
 }
 
 export type Hit =
@@ -39,10 +44,26 @@ export class RhythmSession {
   readonly wrong: [number, number][] = [];
   extras = 0;
 
+  /** Hit notes whose key is still down, by key. */
+  private open = new Map<number, Target>();
+
   constructor(readonly targets: Target[], readonly msPerBeat: number) {}
 
+  /** A key released at `beat`: closes the note it played, if any. */
+  noteOff(midi: number, beat: number): void {
+    const t = this.open.get(midi);
+    if (!t) return;
+    t.offBeat = beat;
+    this.open.delete(midi);
+  }
+
+  /** End of the run: keys still down count as held at least to their written end. */
+  releaseAll(beat: number): void {
+    for (const [midi, t] of [...this.open]) this.noteOff(midi, Math.max(beat, t.note.tieEnd));
+  }
+
   /** A key at `beat` (already corrected for latency). */
-  noteOn(midi: number, beat: number): Hit {
+  noteOn(midi: number, beat: number, velocity = 0): Hit {
     const maxB = WINDOWS.max / this.msPerBeat;
     let best: Target | null = null;
     let nearest: Target | null = null;
@@ -61,6 +82,9 @@ export class RhythmSession {
       const a = Math.abs(dtMs);
       best.grade = a <= WINDOWS.perfect ? 'perfect' : 'good';
       best.dtMs = dtMs;
+      best.velocity = velocity;
+      best.onBeat = beat;
+      this.open.set(midi, best);
       return { kind: 'hit', target: best, grade: best.grade, dtMs };
     }
     if (nearest) {

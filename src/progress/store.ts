@@ -99,6 +99,13 @@ export interface SessionMetrics {
   /** [expected, played, count] */
   confusions: [number, number, number][];
   assisted: boolean;
+  /** Rhythm mode with a MIDI piano: share of notes held their full length. */
+  held?: number;
+  /** Dynamics: forte − piano velocity, and notes on the right side. */
+  contrast?: number;
+  dynAccuracy?: number;
+  /** Melody − accompaniment velocity. */
+  balance?: number;
 }
 
 /** Fold per-note results and confusions in, and mark today as practised. */

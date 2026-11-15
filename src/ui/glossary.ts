@@ -65,7 +65,12 @@ const GROUPS: { title: string; terms: Term[] }[] = [
       { fr: 'tonalité', en: 'key', def: 'Ré majeur = D major, la mineur = A minor. L’armure l’indique.' },
       { fr: 'majeur / mineur', en: 'major / minor', def: 'Deux couleurs de gamme : plutôt lumineuse / plutôt sombre.' },
       { fr: 'accord', en: 'chord', def: 'Plusieurs notes jouées ensemble.' },
-      { fr: 'arpège', en: 'arpeggio (broken chord)', def: 'Les notes d’un accord jouées l’une après l’autre.' }
+      { fr: 'arpège', en: 'arpeggio (broken chord)', def: 'Les notes d’un accord jouées l’une après l’autre.' },
+      { fr: 'accords I, IV, V7', en: 'primary chords (tonic, subdominant, dominant 7th)', def: 'Les trois accords principaux d’une tonalité. En C : C-E-G, C-F-A, B-F-G.' },
+      { fr: 'accord plaqué / brisé', en: 'block chord / broken chord', def: 'Toutes les notes ensemble / l’une après l’autre.' },
+      { fr: 'basse d’Alberti', en: 'Alberti bass', def: 'Accord brisé en croches : bas, haut, milieu, haut (C-G-E-G).' },
+      { fr: 'basse-accord', en: 'oom-pah (bass and chord)', def: 'La basse seule, puis le reste de l’accord, en alternance.' },
+      { fr: 'cadence', en: 'cadence', def: 'La fin d’une phrase : V → I sonne conclusif, une fin sur V reste en suspens.' }
     ]
   },
   {
@@ -76,6 +81,7 @@ const GROUPS: { title: string; terms: Term[] }[] = [
       { fr: 'position de C', en: 'C position (five-finger position)', def: 'Un doigt par touche, de C à G, sans bouger la main.' },
       { fr: 'passage du pouce', en: 'thumb under', def: 'Le pouce passe sous la main pour continuer une gamme.' },
       { fr: 'mains séparées / ensemble', en: 'hands separately / hands together', def: 'D’abord chaque main seule, puis les deux.' },
+      { fr: 'mouvement parallèle / contraire', en: 'parallel / contrary motion', def: 'Les deux mains vont dans le même sens / en sens inverse, comme dans un miroir.' },
       { fr: 'lecture à vue', en: 'sight-reading', def: 'Jouer une partition jamais vue, d’un bout à l’autre sans s’arrêter.' },
       { fr: 'pédale forte', en: 'sustain pedal (damper pedal)', def: 'La pédale de droite : les notes continuent de sonner.' }
     ]

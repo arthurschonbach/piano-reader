@@ -15,6 +15,8 @@ export interface StepResult {
   reactionMs: number;
   /** The note name was revealed after repeated mistakes. */
   hinted: boolean;
+  /** Key velocity of each expected note (0 = already down, unknown). */
+  velocities: number[];
 }
 
 export type Feedback =
@@ -51,6 +53,7 @@ export class WaitSession {
   readonly results: StepResult[] = [];
   index = 0;
   private wrong: number[] = [];
+  private vel = new Map<number, number>();
   private stepStart: number;
 
   constructor(readonly steps: Step[], now: number) {
@@ -75,22 +78,25 @@ export class WaitSession {
     this.stepStart = now;
   }
 
-  noteOn(midi: number, now: number, held: ReadonlySet<number>): Feedback {
+  noteOn(midi: number, now: number, held: ReadonlySet<number>, velocity = 0): Feedback {
     const step = this.current;
     if (!step) return { kind: 'ignored' };
     if (!step.midis.includes(midi)) {
       this.wrong.push(midi);
       return { kind: 'wrong', played: midi, hint: this.wrong.length >= HINT_AFTER };
     }
+    this.vel.set(midi, velocity);
     if (!step.midis.every((m) => held.has(m) || m === midi)) return { kind: 'partial' };
     const result: StepResult = {
       expected: step.midis,
       wrong: this.wrong,
       reactionMs: Math.max(0, now - this.stepStart),
-      hinted: this.wrong.length >= HINT_AFTER
+      hinted: this.wrong.length >= HINT_AFTER,
+      velocities: step.midis.map((m) => this.vel.get(m) ?? 0)
     };
     this.results.push(result);
     this.wrong = [];
+    this.vel.clear();
     this.index++;
     this.stepStart = now;
     return { kind: 'correct', result, done: this.done };

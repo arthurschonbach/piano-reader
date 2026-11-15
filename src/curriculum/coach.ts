@@ -2,12 +2,16 @@
  * The "teacher" logic: what counts as success, what to work on next,
  * what goes into today's session. Pure functions over progress.
  */
-import { LESSONS, MASTERY, lessonNotes, type Hand, type Lesson } from './lessons';
+import { LESSONS, MASTERY, lessonNotes, type Hand, type Lesson, type TouchReq } from './lessons';
 import { PIECES, PIECE_STAGES, type Piece } from './pieces';
 import { dayKey, pieceDue, type Progress, type SessionMetrics } from '../progress/store';
 
-export function passes(mode: 'wait' | 'rhythm', m: SessionMetrics, targetBpm?: number): boolean {
+export function passes(mode: 'wait' | 'rhythm', m: SessionMetrics, targetBpm?: number, touch?: TouchReq): boolean {
   if (m.assisted) return false;
+  if (touch?.contrast !== undefined && !((m.contrast ?? 0) >= touch.contrast && (m.dynAccuracy ?? 0) >= MASTERY.dynamics.accuracy)) return false;
+  if (touch?.balance !== undefined && !((m.balance ?? -Infinity) >= touch.balance)) return false;
+  // Held notes count only when the piano sent key releases.
+  if (mode === 'rhythm' && m.held !== undefined && m.held < MASTERY.rhythm.held) return false;
   if (mode === 'wait') return m.accuracy >= MASTERY.wait.accuracy && (m.medianReactionMs ?? Infinity) <= MASTERY.wait.medianReactionMs;
   const fastEnough = !targetBpm || (m.tempo ?? 0) >= targetBpm - 0.5;
   return fastEnough && m.accuracy >= MASTERY.rhythm.accuracy && (m.timingMs ?? Infinity) <= MASTERY.rhythm.timingMs;

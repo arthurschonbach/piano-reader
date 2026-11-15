@@ -379,6 +379,13 @@ export class ScoreRenderer {
       ctx.textAlign = 'left';
       ctx.fillText(String(m.label ?? m.number), bx + 4 * U, trebleTop - 6 * U);
       this.drawMeasureHeader(score, m, m.number === 1 ? lineX : bx, SP, staffTop, bottomIdx, yIdxFor, single);
+      if (m.dynamic) {
+        // Below a lone staff, or between the two staves of a grand staff.
+        // Clear of a middle C on its ledger line (one space under the staff).
+        const dy = single ? trebleBottom + 4.4 * SP : (trebleBottom + staffTop[1]) / 2 + 0.9 * SP;
+        ctx.fillStyle = P.ink;
+        drawG(m.dynamic === 'p' ? 'dynamicPiano' : 'dynamicForte', 3.4 * SP, bx + 0.4 * SP, dy);
+      }
     }
     if (!score.infinite && score.measures.length) {
       const fx = xOf(totalBeats(score));

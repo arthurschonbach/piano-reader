@@ -32,9 +32,11 @@ const FAKE_MIDI = `
   window.__playInTime = () => {
     const ex = document.querySelector('.ex');
     const t0 = Number(ex.dataset.t0), spb = Number(ex.dataset.msPerBeat), lat = Number(ex.dataset.latency);
-    for (const [beat, midi] of JSON.parse(ex.dataset.onsets)) {
+    for (const [beat, midi, len, dyn] of JSON.parse(ex.dataset.onsets)) {
       const at = t0 + beat * spb + lat - performance.now();
-      setTimeout(() => { window.__midi(0x90, midi, 90); setTimeout(() => window.__midi(0x80, midi, 0), 80); }, Math.max(0, at));
+      const vel = dyn === 'p' ? 45 : dyn === 'f' ? 95 : 90;
+      // Hold each key for its written length, released just before the next note.
+      setTimeout(() => { window.__midi(0x90, midi, vel); setTimeout(() => window.__midi(0x80, midi, 0), len * spb - 40); }, Math.max(0, at));
     }
   };
 `;
@@ -132,6 +134,15 @@ const startExercise = async (page: Page) => {
   await page.waitForSelector('.results', { timeout: 60000 });
   const rr = await page.textContent('.results');
   ok(!!rr && rr.includes('Séance validée'), `rhythm lesson validated when played in time (${rr?.slice(0, 80)})`);
+  ok(!!rr && rr.includes('notes tenues jusqu’au bout'), 'rhythm: held notes reported');
+
+  // Piano and forte, played soft and loud where marked.
+  await page.goto('http://localhost:5199/#/lecon/piano-forte');
+  await startExercise(page);
+  await page.evaluate(() => (window as unknown as { __playInTime: () => void }).__playInTime());
+  await page.waitForSelector('.results', { timeout: 60000 });
+  const pf = await page.textContent('.results');
+  ok(!!pf && pf.includes('Séance validée') && pf.includes('+50') && pf.includes('100 %notes tenues'), `dynamics lesson validated with a clear contrast (${pf?.slice(0, 200)})`);
 
   // Daily session: warm-up first, then "Continuer".
   await page.goto('http://localhost:5199/#/seance');

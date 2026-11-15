@@ -1,7 +1,8 @@
 import { ClickTrack } from '../core/audio';
 import type { Mark } from '../core/engraver';
 import { ScrollStrip } from '../core/scroller';
-import { noteName, spellOfMidi, type NoteItem, type Score } from '../core/model';
+import { dynamicsByMeasure, measureAt, noteName, spellOfMidi, type NoteItem, type Score } from '../core/model';
+import { summarizeTouch, type TouchNote, type TouchSummary } from '../exercise/touch';
 import { buildSteps, summarize, WaitSession, type StepResult, type Summary } from '../exercise/wait';
 import { buildTargets, RhythmSession, summarizeRhythm, WINDOWS, type RhythmSummary } from '../exercise/rhythm';
 import { mountKeyboard } from '../input/keyboard';
@@ -32,6 +33,8 @@ export interface PlayConfig {
   stopWhen?: (results: StepResult[]) => boolean;
   /** Fingering numbers drawn (default true). */
   fingers?: boolean;
+  /** Staff carrying the melody, for the melody/accompaniment balance. */
+  melodyStaff?: number;
   onFinish: (o: Outcome, show: (card: HTMLElement) => void, restart: () => void) => void;
   onExit: () => void;
 }
@@ -40,6 +43,9 @@ export interface Outcome {
   metrics: SessionMetrics;
   wait?: Summary & { results: StepResult[] };
   rhythm?: RhythmSummary;
+  touch: TouchSummary;
+  /** The piano sent velocities (not the on-screen keys). */
+  felt: boolean;
   stoppedEarly: boolean;
 }
 
@@ -190,6 +196,8 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     labels
   });
   const lastBeat = mode === 'rhythm' ? Math.max(...buildTargets(score).map((t) => t.beat)) : 0;
+  /** Rhythm mode: the last note's written end, so a final long note is held to the end. */
+  const lastEnd = mode === 'rhythm' ? Math.max(...buildTargets(score).map((t) => t.note.tieEnd)) : 0;
   /** Rhythm mode: the run ends once the last note's window has passed. */
   const endBeat = lastBeat + 4;
   let raf = 0;
@@ -207,6 +215,12 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
   let t0 = 0;
   let msPerBeat = 1000;
   let judged = 0;
+  /** Dynamic in force for each bar; the bar where the last live report was given. */
+  const dynOf = dynamicsByMeasure(score);
+  const hasDyn = dynOf.some((d) => d);
+  let dynSection = -1;
+  let sawVelocity = false;
+  let sawRelease = false;
 
   viewBeat = mode === 'wait' ? steps[0]?.beat ?? 0 : -2;
   sv.place(viewBeat, false);
@@ -239,7 +253,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     releaseWake ??= keepAwake();
     if (mode === 'wait') {
       wait = new WaitSession(steps, performance.now());
-      setFeedback(score.staves > 1 ? 'Joue la note entourée (ou les deux, si elles sont alignées).' : 'Joue la note entourée.');
+      setFeedback(score.staves > 1 ? 'Joue les notes entourées, toutes ensemble si elles sont alignées.' : 'Joue la note entourée.');
       markCurrent();
     } else {
       app.metronome.unlock();
@@ -256,10 +270,13 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
       view.dataset.t0 = String(t0);
       view.dataset.msPerBeat = String(msPerBeat);
       view.dataset.latency = String(app.settings.latencyMs);
-      view.dataset.onsets = JSON.stringify(rhythm.targets.map((t) => [t.beat, t.midi]));
+      view.dataset.onsets = JSON.stringify(rhythm.targets.map((t) => [t.beat, t.midi, t.note.tieEnd - t.note.beat, dynOf[measureAt(score, t.note.beat)] ?? '']));
       setCount(`${bpm} bpm`);
       judged = 0;
+      dynSection = -1;
     }
+    sawVelocity = false;
+    sawRelease = false;
   };
 
   const restart = () => {
@@ -281,12 +298,28 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     releaseWake?.();
     releaseWake = null;
     let outcome: Outcome;
+    const melodyStaff = cfg.melodyStaff;
+    const measureOf = (n: NoteItem) => measureAt(score, n.beat);
     if (mode === 'wait' && wait) {
       const s = summarize(wait.results);
-      outcome = { metrics: waitMetrics(wait.results, s, assisted), wait: { ...s, results: wait.results }, stoppedEarly };
+      const tn: TouchNote[] = wait.results.flatMap((r, i) =>
+        steps[i].notes.map((n) => ({
+          midi: n.midi, staff: n.staff, chord: steps[i].notes.some((o) => o !== n && o.staff === n.staff && o.midi < n.midi),
+          velocity: sawVelocity ? r.velocities[r.expected.indexOf(n.midi)] ?? 0 : 0, dyn: dynOf[measureOf(n)]
+        }))
+      );
+      const touch = summarizeTouch(tn, { melodyStaff });
+      const metrics = { ...waitMetrics(wait.results, s, assisted), balance: touch.balance, contrast: touch.contrast, dynAccuracy: touch.dynAccuracy };
+      outcome = { metrics, wait: { ...s, results: wait.results }, touch, felt: sawVelocity, stoppedEarly };
     } else {
       const r = rhythm!;
+      r.releaseAll((performance.now() - app.settings.latencyMs - t0) / msPerBeat);
       const s = summarizeRhythm(r);
+      const tn: TouchNote[] = r.targets.map((t) => ({
+        midi: t.midi, staff: t.note.staff, chord: t.note.chord, velocity: sawVelocity ? t.velocity ?? 0 : 0, dyn: dynOf[measureOf(t.note)],
+        start: t.note.beat, end: t.note.tieEnd, on: t.onBeat, off: sawRelease ? t.offBeat : undefined
+      }));
+      const touch = summarizeTouch(tn, { msPerBeat, melodyStaff });
       const conf = new Map<string, [number, number, number]>();
       for (const [e, p] of r.wrong) {
         const k = `${e}>${p}`;
@@ -298,9 +331,12 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
       outcome = {
         metrics: {
           mode: 'rhythm', accuracy: s.accuracy, timingMs: s.timingMs, tempo: bpm, attempts,
-          confusions: [...conf.values()].sort((a, b) => b[2] - a[2]), assisted
+          confusions: [...conf.values()].sort((a, b) => b[2] - a[2]), assisted,
+          held: touch.held, balance: touch.balance, contrast: touch.contrast, dynAccuracy: touch.dynAccuracy
         },
         rhythm: s,
+        touch,
+        felt: sawVelocity,
         stoppedEarly
       };
     }
@@ -309,14 +345,23 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
 
   // ---------- input ----------
   const offBus = app.bus.on((e) => {
-    if (!e.on || finished) return;
+    if (finished) return;
+    if (!e.on) {
+      if (mode === 'rhythm' && rhythm && view.dataset.phase === 'play') {
+        sawRelease = true;
+        rhythm.noteOff(e.midi, (e.time - app.settings.latencyMs - t0) / msPerBeat);
+      }
+      return;
+    }
+    // The on-screen keys always send the same velocity: only a real piano counts for touch.
+    if (app.midi.connected && view.dataset.phase === 'play') sawVelocity = true;
     if (view.dataset.phase === 'intro') {
       if (mode === 'wait' && !overlay.querySelector('.results')) start();
       return;
     }
     if (mode === 'wait' && wait && !wait.done) {
       const step = wait.current!;
-      const fb = wait.noteOn(e.midi, e.time, app.bus.held);
+      const fb = wait.noteOn(e.midi, e.time, app.bus.held, e.velocity);
       if (fb.kind === 'wrong') {
         for (const n of step.notes) setMark(n, 'bad');
         window.clearTimeout(badTimer);
@@ -346,7 +391,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     } else if (mode === 'rhythm' && rhythm) {
       const beat = (e.time - app.settings.latencyMs - t0) / msPerBeat;
       if (beat < -0.6) return; // count-in
-      const hit = rhythm.noteOn(e.midi, beat);
+      const hit = rhythm.noteOn(e.midi, beat, e.velocity);
       if (hit.kind === 'hit') {
         judged++;
         setMark(hit.target.note, hit.grade === 'perfect' ? 'ok' : 'late');
@@ -395,6 +440,23 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
   ro.observe(stage);
 
 
+  /** Rhythm mode with dynamics: when a new marking starts, say how loud the last section was. */
+  const reportDynamics = (beat: number) => {
+    if (beat < 0) return;
+    const mi = measureAt(score, beat);
+    let start = mi;
+    while (start > 0 && !score.measures[start].dynamic) start--;
+    if (start === dynSection) return;
+    const prev = dynSection;
+    dynSection = start;
+    if (prev < 0 || !rhythm) return;
+    const d = dynOf[prev];
+    const vs = rhythm.targets.filter((t) => t.velocity && measureAt(score, t.note.beat) >= prev && measureAt(score, t.note.beat) < start).map((t) => t.velocity!);
+    if (!d || !vs.length) return;
+    const avg = Math.round(vs.reduce((a, b) => a + b, 0) / vs.length);
+    setFeedback(`${d === 'p' ? 'piano' : 'forte'} : ${avg} / 127`, '');
+  };
+
   const frame = () => {
     raf = requestAnimationFrame(frame);
     if (mode === 'wait') {
@@ -415,7 +477,8 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
         setFeedback('raté', 'bad');
       }
       setCount(`${judged} / ${rhythm.targets.length}`);
-      if (viewBeat > lastBeat + WINDOWS.max / msPerBeat + 1.5) finish(false);
+      if (hasDyn && sawVelocity) reportDynamics(viewBeat);
+      if (viewBeat > Math.max(lastBeat + WINDOWS.max / msPerBeat + 1.5, lastEnd + 0.25)) finish(false);
     }
     // Only tile upkeep here; the movement itself is done by the compositor.
     sv.update(viewBeat);

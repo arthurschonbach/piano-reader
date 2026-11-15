@@ -10,7 +10,8 @@ import {
   addDays, dayKey, emptyProgress, exportProgress, importProgress, migrate, recordLesson, recordPiece, recordPlacement,
   recordPractice, streak, validatedDays, weakestNotes, weaknessMap, type SessionMetrics
 } from '../src/progress/store';
-import { noteName, makeNote, spellOfMidi, type Score } from '../src/core/model';
+import { dynamicsByMeasure, noteName, makeNote, spellOfMidi, type Score } from '../src/core/model';
+import { summarizeTouch, type TouchNote } from '../src/exercise/touch';
 
 let fails = 0;
 const ok = (cond: boolean, msg: string) => {
@@ -79,6 +80,50 @@ ok(r.tick(2.5).length === 1 && targets[2].grade === 'miss', 'unplayed note becom
 const rs = summarizeRhythm(r);
 ok(rs.hits === 3 && rs.missed === 1 && Math.abs(rs.accuracy - 0.75) < 1e-9, 'rhythm summary');
 
+// --- Touch: key releases and velocity ---
+const rel = new RhythmSession(buildTargets(tiny), 1000);
+rel.noteOn(60, 0, 70);
+rel.noteOff(60, 0.95);
+rel.noteOn(64, 1.02, 72);
+rel.noteOff(64, 1.4);
+rel.noteOn(60, 2, 75);
+rel.noteOn(67, 2, 74);
+rel.releaseAll(3.9);
+ok(rel.targets[0].velocity === 70 && rel.targets[0].offBeat === 0.95, 'rhythm: velocity and release recorded');
+ok(rel.targets[3].offBeat === 4, 'rhythm: keys still down are closed at the end');
+const heldEnd = new RhythmSession(buildTargets(tiny), 1000);
+heldEnd.noteOn(60, 2, 70);
+heldEnd.releaseAll(2.5);
+ok(heldEnd.targets[2].offBeat === 4, 'rhythm: a key down when the run ends counts as held to its written end');
+const tnOf = (t: (typeof rel.targets)[number]): TouchNote => ({ midi: t.midi, staff: t.note.staff, chord: t.note.chord, velocity: t.velocity ?? 0, start: t.note.beat, end: t.note.tieEnd, on: t.onBeat, off: t.offBeat });
+const tsum = summarizeTouch(rel.targets.map(tnOf), { msPerBeat: 1000 });
+ok(tsum.heldJudged === 4 && Math.abs(tsum.held! - 0.75) < 1e-9 && tsum.shortAt.join() === '1', 'touch: a quarter released at 40% is too short, the others are held');
+const line = (offs: number[]): TouchNote[] => [60, 62, 64, 65, 67].map((m, i) => ({ midi: m, staff: 0, chord: false, velocity: 64, start: i, end: i + 1, on: i, off: offs[i] }));
+ok(summarizeTouch(line([1, 2, 3, 4, 5]), { msPerBeat: 500 }).legato === 1, 'touch: releases on the next note are legato');
+ok(summarizeTouch(line([0.6, 1.6, 2.6, 3.6, 4.6]), { msPerBeat: 500 }).legato === 0, 'touch: 200 ms gaps are not legato');
+const dynNotes: TouchNote[] = [40, 44, 42, 46].map((v): TouchNote => ({ midi: 60, staff: 0, chord: false, velocity: v, dyn: 'p' }))
+  .concat([80, 86, 84, 90].map((v): TouchNote => ({ midi: 60, staff: 0, chord: false, velocity: v, dyn: 'f' })));
+const ds = summarizeTouch(dynNotes);
+ok(Math.round(ds.contrast!) === 42 && ds.dynAccuracy === 1, 'touch: forte − piano contrast');
+ok(ds.spread! < 4, 'touch: evenness is measured within each dynamic');
+const bal = summarizeTouch(
+  [70, 72, 74, 71].map((v): TouchNote => ({ midi: 64, staff: 0, chord: false, velocity: v })).concat([50, 52, 51, 49].map((v): TouchNote => ({ midi: 48, staff: 1, chord: false, velocity: v }))),
+  { melodyStaff: 0 }
+);
+ok(Math.round(bal.balance!) === 21, 'touch: melody above accompaniment');
+ok(summarizeTouch(line([1, 2, 3, 4, 5]).map((n) => ({ ...n, velocity: 0 }))).spread === undefined, 'touch: no velocity, no touch verdict');
+const ws = new WaitSession(buildSteps(tiny), 0);
+ws.noteOn(60, 100, new Set(), 55);
+ok(ws.results[0].velocities.join() === '55', 'wait: velocity kept per note');
+const baseM = { mode: 'rhythm' as const, accuracy: 1, timingMs: 50, tempo: 60, attempts: [], confusions: [], assisted: false };
+ok(passes('rhythm', baseM, 60) && passes('rhythm', { ...baseM, held: 0.9 }, 60), 'held notes: pass when held or not measured');
+ok(!passes('rhythm', { ...baseM, held: 0.5 }, 60), 'held notes: fail when released early');
+ok(!passes('rhythm', { ...baseM, contrast: 10, dynAccuracy: 1 }, 60, { contrast: 25 }) && passes('rhythm', { ...baseM, contrast: 30, dynAccuracy: 0.9 }, 60, { contrast: 25 }), 'dynamics: contrast required');
+ok(!passes('rhythm', baseM, 60, { balance: 10 }) && passes('rhythm', { ...baseM, balance: 12 }, 60, { balance: 10 }), 'balance: required, and missing without a piano');
+const pf = generateExercise(LESSONS.find((l) => l.id === 'piano-forte')!, { seed: 3 });
+const dyns = dynamicsByMeasure(pf);
+ok(dyns.every((d) => d) && dyns.includes('p') && dyns.includes('f') && pf.measures.filter((m) => m.dynamic).length === 4, 'dynamics lesson: p and f every two bars');
+
 // --- Generator, every lesson ---
 for (const l of LESSONS) {
   for (const seed of [1, 42, 777]) {
@@ -87,7 +132,7 @@ for (const l of LESSONS) {
     const tag = `L${l.number} seed ${seed}`;
     ok(sc.measures.length === l.bars, `${tag}: ${l.bars} bars`);
     const filled = sc.measures.every((m) =>
-      [...new Set(m.notes.map((n) => n.staff))].every((st) => Math.abs(m.notes.filter((n) => n.staff === st).reduce((a, n) => a + n.dur, 0) - 4) < 1e-9)
+      [...new Set(m.notes.map((n) => n.staff))].every((st) => Math.abs(m.notes.filter((n) => n.staff === st && !n.chord).reduce((a, n) => a + n.dur, 0) - 4) < 1e-9)
     );
     ok(filled, `${tag}: every staff fills every bar`);
     const allowed = new Set(lessonNotes(l));
@@ -109,6 +154,27 @@ const fa = generateExercise(LESSONS.find((l) => l.id === 'fa-majeur')!, { seed: 
 ok(fa.measures.flatMap((m) => m.notes).filter((n) => n.midi === 70).every((n) => noteName(n.spell) === 'B♭'), 'F major: Bb spelled B♭');
 const tog = generateExercise(LESSONS.find((l) => l.id === 'deux-mains')!, { seed: 9 });
 ok(buildSteps(tog).some((st) => st.midis.length === 2), 'hands together: some steps need both hands');
+// --- Hands together: chords and mirrored motion ---
+const notesOf = (sc: Score, staff: number) => sc.measures.flatMap((m) => m.notes.filter((n) => n.staff === staff && !n.rest));
+const mir = generateExercise(LESSONS.find((l) => l.id === 'mouvement-contraire')!, { seed: 4 });
+const rhM = notesOf(mir, 0);
+const lhM = notesOf(mir, 1);
+ok(rhM.length === lhM.length && rhM.every((n, i) => n.beat === lhM[i].beat && n.dur === lhM[i].dur), 'mirror: same rhythm in both hands');
+const moves = rhM.slice(1).map((n, i) => Math.sign(n.midi - rhM[i].midi) * Math.sign(lhM[i + 1].midi - lhM[i].midi));
+ok(moves.includes(1) && moves.includes(-1), 'mirror: both parallel and contrary motion');
+const chordSc = generateExercise(LESSONS.find((l) => l.id === 'trois-accords')!, { seed: 4 });
+const chordSteps = buildSteps(chordSc);
+ok(chordSteps.some((st) => st.midis.slice(0, 3).join() === '47,53,55'), 'chords: V7 voicing B-F-G appears');
+ok(chordSteps.filter((st) => st.midis.length >= 4).length >= 4, 'chords: melody note struck with a three-note chord');
+const lastChord = chordSc.measures.at(-1)!.notes.filter((n) => n.staff === 1).map((n) => n.midi).join();
+ok(lastChord === '48,52,55', 'chords: ends on the I chord');
+const alb = generateExercise(LESSONS.find((l) => l.id === 'alberti-au-tempo')!, { seed: 4 });
+const bar1 = alb.measures[0].notes.filter((n) => n.staff === 1).map((n) => n.midi).join();
+ok(bar1 === '48,55,52,55,48,55,52,55', 'Alberti: low, high, middle, high');
+const lhMel = generateExercise(LESSONS.find((l) => l.id === 'melodie-main-gauche')!, { seed: 4 });
+ok(notesOf(lhMel, 0).some((n) => n.chord) && !notesOf(lhMel, 1).some((n) => n.chord), 'left-hand melody: chords move to the right hand');
+ok(generateExercise(LESSONS.find((l) => l.id === 'trois-accords')!, { seed: 4, bars: 2, noHome: true, grand: true }).measures.length === 2, 'chords: short blocks work too');
+
 const a1 = generateExercise(LESSONS[0], { seed: 7 }).measures.flatMap((m) => m.notes.map((n) => n.midi)).join();
 ok(a1 === generateExercise(LESSONS[0], { seed: 7 }).measures.flatMap((m) => m.notes.map((n) => n.midi)).join(), 'same seed, same exercise');
 let plain = 0;

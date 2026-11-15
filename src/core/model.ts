@@ -35,6 +35,16 @@ export interface Measure {
   keyChange: boolean;
   time: [number, number] | null;
   notes: NoteItem[];
+  /** Dynamic marking printed at the start of the bar, valid until the next one. */
+  dynamic?: Dyn;
+}
+
+export type Dyn = 'p' | 'f';
+
+/** The dynamic in force for each bar (undefined before the first marking). */
+export function dynamicsByMeasure(score: Score): (Dyn | undefined)[] {
+  let cur: Dyn | undefined;
+  return score.measures.map((m) => (cur = m.dynamic ?? cur));
 }
 
 export interface Score {
