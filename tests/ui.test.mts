@@ -159,6 +159,16 @@ const startExercise = async (page: Page) => {
   ok(await page.isVisible('.assisted'), 'look-ahead: removing the curtain marks the session as not counted');
   ok(await page.evaluate(`document.querySelector('.strip-mask').hidden`), 'look-ahead: curtain removed');
 
+  // Technique: a scale played in time is a clean run, and the tempo goes up.
+  await page.goto('http://localhost:5199/#/technique');
+  ok((await page.locator('.pieces li').count()) >= 16, 'technique page lists the drills');
+  await page.goto('http://localhost:5199/#/technique/gamme-do-md');
+  await startExercise(page);
+  await page.evaluate(() => (window as unknown as { __playInTime: () => void }).__playInTime());
+  await page.waitForSelector('.results', { timeout: 60000 });
+  const tr = await page.textContent('.results');
+  ok(!!tr && tr.includes('Passage propre') && tr.includes('prochain essai à 54 bpm'), `technique: clean run raises the tempo (${tr?.slice(0, 200)})`);
+
   // Daily session: warm-up first, then "Continuer".
   await page.goto('http://localhost:5199/#/seance');
   await startExercise(page);

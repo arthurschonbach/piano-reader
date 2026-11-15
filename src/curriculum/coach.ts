@@ -4,6 +4,7 @@
  */
 import { LESSONS, MASTERY, lessonNotes, type Hand, type Lesson, type TouchReq } from './lessons';
 import { PIECES, PIECE_STAGES, type Piece } from './pieces';
+import { DRILLS, type Drill } from './technique';
 import { dayKey, pieceDue, type Progress, type SessionMetrics } from '../progress/store';
 
 export function passes(mode: 'wait' | 'rhythm', m: SessionMetrics, targetBpm?: number, touch?: TouchReq): boolean {
@@ -115,8 +116,30 @@ export function duePieces(p: Progress, now = Date.now()): Piece[] {
   return PIECES.filter((pc) => pieceDue(p.pieces[pc.id], PIECE_STAGES.length, now));
 }
 
+/** Drills whose lesson is done (or that need none), in book order. */
+export function availableDrills(p: Progress): Drill[] {
+  return DRILLS.filter((d) => {
+    const l = d.after ? LESSONS.find((x) => x.id === d.after) : undefined;
+    return !l || lessonDone(p, l);
+  });
+}
+
+/**
+ * Today's technique drill: among those not yet at their goal tempo, the one
+ * least recently played (never played comes first, in book order).
+ */
+export function drillOfTheDay(p: Progress): Drill | null {
+  const avail = availableDrills(p);
+  if (!avail.length) return null;
+  const open = avail.filter((d) => !p.technique[d.id]?.reached);
+  const pool = open.length ? open : avail;
+  const last = (d: Drill) => p.technique[d.id]?.sessions.at(-1)?.date ?? 0;
+  return [...pool].sort((a, b) => last(a) - last(b))[0];
+}
+
 export type Activity =
   | { kind: 'flash'; label: string }
+  | { kind: 'technique'; label: string; drillId: string }
   | { kind: 'sight'; label: string }
   | { kind: 'lesson'; label: string; lessonId: string; review: boolean }
   | { kind: 'piece'; label: string; pieceId: string; stage: number; review: boolean };
@@ -127,6 +150,8 @@ export type Activity =
  */
 export function dailyPlan(p: Progress, now = Date.now()): Activity[] {
   const out: Activity[] = [{ kind: 'flash', label: 'Échauffement lecture' }];
+  const drill = drillOfTheDay(p);
+  if (drill) out.push({ kind: 'technique', label: `Technique · ${drill.title}`, drillId: drill.id });
   const cur = currentLesson(p);
   if (cur && LESSONS.indexOf(cur) >= 1) out.push({ kind: 'sight', label: 'Lecture à vue' });
   if (cur) out.push({ kind: 'lesson', label: `Leçon ${cur.number} · ${cur.title}`, lessonId: cur.id, review: false });

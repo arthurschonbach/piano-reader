@@ -6,7 +6,8 @@ import { blockPasses, flashLesson, lessonDone, passes, sightReadingLesson } from
 import { generateExercise } from '../curriculum/generate';
 import { LESSONS, MASTERY, type Lesson, type TouchReq } from '../curriculum/lessons';
 import { PIECE_STAGES, pieceScore, type Piece } from '../curriculum/pieces';
-import { recordLesson, recordPiece, recordPractice, validatedDays, weaknessMap } from '../progress/store';
+import { analyzeDrill, BPM_STEP, DRILL_PASS, drillPasses, drillScore, type Drill } from '../curriculum/technique';
+import { recordDrill, recordLesson, recordPiece, recordPractice, validatedDays, weaknessMap } from '../progress/store';
 import type { App } from './app';
 import { percent, resultCard, seconds, type CardAction, type StatLine } from './dom';
 import { mountPlayer, nameOf, type Outcome } from './player';
@@ -275,6 +276,72 @@ export function playPieceStage(root: HTMLElement, app: App, piece: Piece, stageI
           notes,
           list: { heading: 'Tes confusions', items: confusionItems(o) },
           actions: actions(hooks, again, extra)
+        })
+      );
+    }
+  });
+  return () => cleanup();
+}
+
+/** One technique drill, at its own tempo, which rises after each clean run. */
+export function playDrill(root: HTMLElement, app: App, drill: Drill, hooks: Hooks): () => void {
+  const { score, crossings } = drillScore(drill);
+  const rec = app.progress.technique[drill.id];
+  const bpm = rec?.bpm ?? drill.startBpm;
+  let cleanup = () => undefined as void;
+  const again = () => {
+    cleanup();
+    cleanup = playDrill(root, app, drill, hooks);
+  };
+  const criteria =
+    `Passage propre : ${percent(DRILL_PASS.accuracy)} de notes justes, régularité à ±${DRILL_PASS.steadinessMs} ms` +
+    (drill.chords ? `, notes des accords ensemble à ${DRILL_PASS.chordSpreadMs} ms près` : `, ${percent(DRILL_PASS.legato)} des enchaînements liés`) +
+    (drill.rh && drill.lh ? `, mains ensemble à ${DRILL_PASS.chordSpreadMs} ms près` : '') +
+    `. Chaque passage propre monte le tempo de ${BPM_STEP} bpm, jusqu’à ${drill.goalBpm}.`;
+  cleanup = mountPlayer(root, app, {
+    title: `Technique · ${drill.title}`,
+    score,
+    mode: 'rhythm',
+    bpm,
+    targetBpm: bpm,
+    intro: { heading: drill.title, paragraphs: [drill.desc, ...drill.tips], setup: drill.setup, criteria },
+    onExit: hooks.onExit,
+    onFinish: (o, show) => {
+      const a = analyzeDrill(o.targets ?? [], crossings);
+      const played = o.metrics.tempo ?? bpm;
+      const clean = drillPasses(drill, { accuracy: o.metrics.accuracy, assisted: o.metrics.assisted, legato: o.touch.legato }, a);
+      const r = recordDrill(app.progress, drill.id, o.metrics, clean, played, drill.startBpm, drill.goalBpm, BPM_STEP);
+      app.setProgress(r.progress);
+      const stats: StatLine[] = [
+        { value: percent(o.metrics.accuracy), label: `notes justes et à temps (objectif ${percent(DRILL_PASS.accuracy)})`, ok: o.metrics.accuracy >= DRILL_PASS.accuracy }
+      ];
+      if (a.steadiness !== undefined) stats.push({ value: `±${Math.round(a.steadiness)} ms`, label: `régularité du rythme (objectif ±${DRILL_PASS.steadinessMs} ms)`, ok: a.steadiness <= DRILL_PASS.steadinessMs });
+      if (!drill.chords && o.touch.legato !== undefined) stats.push({ value: percent(o.touch.legato), label: `enchaînements liés (objectif ${percent(DRILL_PASS.legato)})`, ok: o.touch.legato >= DRILL_PASS.legato });
+      if (a.chordSpreadMs !== undefined && (drill.chords || (drill.rh && drill.lh))) {
+        stats.push({ value: `${Math.round(a.chordSpreadMs)} ms`, label: `${drill.chords ? 'entre les notes d’un accord' : 'entre les deux mains'} (objectif < ${DRILL_PASS.chordSpreadMs} ms)`, ok: a.chordSpreadMs <= DRILL_PASS.chordSpreadMs });
+      }
+      if (o.touch.spread !== undefined && o.felt) stats.push({ value: `±${Math.round(o.touch.spread)}`, label: 'régularité du toucher (sur 127)' });
+      stats.push({ value: `${played} bpm`, label: `tempo (objectif final ${drill.goalBpm})`, ok: played >= drill.goalBpm });
+
+      const notes: string[] = [];
+      if (r.raisedTo) notes.push(`Passage propre : prochain essai à ${r.raisedTo} bpm.`);
+      else if (clean) notes.push(played >= drill.goalBpm ? 'Tempo final tenu proprement.' : `Propre, mais en dessous du tempo prévu (${bpm} bpm) : le tempo ne monte pas.`);
+      else notes.push(`Pas encore propre : on reste à ${r.progress.technique[drill.id].bpm} bpm. Mieux vaut lent et régulier que rapide et bancal.`);
+      if (a.crossingLagMs !== undefined && Math.abs(a.crossingLagMs) > 25) {
+        notes.push(a.crossingLagMs > 0
+          ? `Passages du pouce en retard de ${Math.round(a.crossingLagMs)} ms en moyenne : prépare le pouce plus tôt, il doit être au-dessus de sa touche avant d’en avoir besoin.`
+          : `Passages du pouce en avance de ${Math.round(-a.crossingLagMs)} ms : tu te précipites sur le passage, garde la pulsation.`);
+      }
+      if (a.crossingAccent !== undefined && a.crossingAccent > 10) notes.push(`Le pouce tape au passage (+${Math.round(a.crossingAccent)} de force) : allège-le, il ne doit pas s’entendre plus que les autres doigts.`);
+      notes.push(...touchNotes(o));
+      show(
+        resultCard({
+          title: clean ? 'Passage propre ✓' : 'Encore un peu',
+          celebrate: r.reachedNow ? `🎉 Tempo final atteint : ${drill.goalBpm} bpm !` : undefined,
+          stats,
+          notes,
+          list: { heading: 'Tes confusions', items: confusionItems(o) },
+          actions: actions(hooks, again)
         })
       );
     }

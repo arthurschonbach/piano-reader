@@ -1,6 +1,8 @@
 import './styles.css';
 import { lessonById } from './curriculum/lessons';
-import { playLesson } from './ui/activities';
+import { playDrill, playLesson } from './ui/activities';
+import { drillById } from './curriculum/technique';
+import { renderTechnique } from './ui/technique';
 import { createApp } from './ui/app';
 import { renderHome } from './ui/home';
 import { renderLibrary, renderPiece } from './ui/library';
@@ -25,6 +27,10 @@ function route(): void {
     cleanup = renderPieceStage(root, app, m[1], Number(m[2]));
   } else if ((m = /^#\/morceau\/([\w-]+)$/.exec(hash))) {
     cleanup = renderPiece(root, app, m[1]);
+  } else if ((m = /^#\/technique\/([\w-]+)$/.exec(hash)) && drillById(m[1])) {
+    cleanup = playDrill(root, app, drillById(m[1])!, { onExit: () => app.go('#/technique') });
+  } else if (hash === '#/technique') {
+    cleanup = renderTechnique(root, app);
   } else if (hash === '#/bibliotheque') {
     cleanup = renderLibrary(root, app);
   } else if (hash === '#/lexique') {

@@ -8,7 +8,8 @@ import { buildSteps, type StepResult } from '../exercise/wait';
 import {
   emptyProgress, exportProgress, importProgress, recordPlacement, recordPractice, streak, validatedDays, weaknessMap
 } from '../progress/store';
-import { playFlash, playLesson, playPieceStage, playSight, type Hooks } from './activities';
+import { playDrill, playFlash, playLesson, playPieceStage, playSight, type Hooks } from './activities';
+import { drillById } from '../curriculum/technique';
 import type { App } from './app';
 import { button, h, percent, resultCard, topBar } from './dom';
 import { mountPlayer, nameOf } from './player';
@@ -36,6 +37,8 @@ export function renderSession(root: HTMLElement, app: App): () => void {
     switch (a.kind) {
       case 'flash':
         return playFlash(root, app, hooks);
+      case 'technique':
+        return playDrill(root, app, drillById(a.drillId)!, hooks);
       case 'sight':
         return playSight(root, app, hooks);
       case 'lesson':

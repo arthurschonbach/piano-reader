@@ -4,12 +4,14 @@ import { buildSteps, HINT_AFTER, summarize, WaitSession } from '../src/exercise/
 import { buildTargets, RhythmSession, summarizeRhythm } from '../src/exercise/rhythm';
 import { concatScores, generateExercise, phrasePlan } from '../src/curriculum/generate';
 import { mulberry32 } from '../src/core/random';
+import { analyzeDrill, DRILLS, drillById, drillPasses, drillScore } from '../src/curriculum/technique';
+import { availableDrills, drillOfTheDay } from '../src/curriculum/coach';
 import { LESSONS, lessonNotes } from '../src/curriculum/lessons';
 import { PIECES, PIECE_STAGES, beatsPerBar, parseHand, pieceScore, pieceTags } from '../src/curriculum/pieces';
 import { blockPasses, currentLesson, currentPiece, dailyPlan, flashLesson, knownHands, passes, sightReadingLesson } from '../src/curriculum/coach';
 import {
   addDays, dayKey, emptyProgress, exportProgress, importProgress, migrate, recordLesson, recordPiece, recordPlacement,
-  recordPractice, streak, validatedDays, weakestNotes, weaknessMap, type SessionMetrics
+  recordDrill, recordPractice, streak, validatedDays, weakestNotes, weaknessMap, type SessionMetrics
 } from '../src/progress/store';
 import { dynamicsByMeasure, noteName, makeNote, spellOfMidi, type Score } from '../src/core/model';
 import { summarizeTouch, type TouchNote } from '../src/exercise/touch';
@@ -124,6 +126,54 @@ ok(!passes('rhythm', baseM, 60, { balance: 10 }) && passes('rhythm', { ...baseM,
 const pf = generateExercise(LESSONS.find((l) => l.id === 'piano-forte')!, { seed: 3 });
 const dyns = dynamicsByMeasure(pf);
 ok(dyns.every((d) => d) && dyns.includes('p') && dyns.includes('f') && pf.measures.filter((m) => m.dynamic).length === 4, 'dynamics lesson: p and f every two bars');
+
+// --- Technique drills ---
+for (const d of DRILLS) {
+  const { score } = drillScore(d);
+  const notes = score.measures.flatMap((m) => m.notes);
+  const filled = score.measures.every((m) => [...new Set(m.notes.map((n) => n.staff))].every((st) => Math.abs(m.notes.filter((n) => n.staff === st && !n.chord).reduce((a, n) => a + n.dur, 0) - 4) < 1e-9));
+  ok(filled, `drill ${d.id}: every bar full`);
+  ok(notes.every((n) => n.finger && n.finger >= 1 && n.finger <= 5), `drill ${d.id}: a finger on every note`);
+  ok(score.staves === (d.rh && d.lh ? 2 : 1), `drill ${d.id}: staves`);
+  // Hands together: never the same key twice at once (one key sends one note).
+  const clash = notes.some((a) => notes.some((b) => a !== b && a.beat === b.beat && a.midi === b.midi));
+  ok(!clash, `drill ${d.id}: no key shared by both hands`);
+}
+const crossingsOf = (id: string) => [...drillScore(drillById(id)!).crossings].map((n) => `${noteName(n.spell)}${n.finger}`).join(' ');
+ok(crossingsOf('gamme-do-md') === 'F1 E3', `C scale RH: thumb under on F, 3 over on E (${crossingsOf('gamme-do-md')})`);
+ok(crossingsOf('gamme-do-mg') === 'A3 G1', `C scale LH: 3 over on A, thumb under on G (${crossingsOf('gamme-do-mg')})`);
+ok(crossingsOf('gamme-fa-md') === 'C1 B♭4', `F scale RH: thumb under the 4 (${crossingsOf('gamme-fa-md')})`);
+ok(drillScore(drillById('arpege-brise-md')!).crossings.size === 0, 'broken chords: no crossing');
+ok(drillScore(drillById('arpege-do-2-octaves-md')!).crossings.size === 2, 'two-octave arpeggio: one crossing each way');
+// Analysis on a played-out scale: crossings 60 ms late, otherwise ±10 ms.
+const cs = drillScore(drillById('gamme-do-md')!);
+const ctg = buildTargets(cs.score).map((t, i) => ({ ...t, grade: 'perfect' as const, dtMs: cs.crossings.has(t.note) ? 60 : i % 2 ? 10 : -10, velocity: cs.crossings.has(t.note) ? 90 : 70 }));
+const an = analyzeDrill(ctg, cs.crossings);
+ok(Math.round(an.crossingLagMs!) === 61 || Math.round(an.crossingLagMs!) === 60, `drill: crossing lag measured (${an.crossingLagMs})`);
+ok(Math.round(an.crossingAccent!) === 20, 'drill: thumb accent measured');
+ok(an.steadiness! > 15 && an.steadiness! < 30, `drill: steadiness (${an.steadiness})`);
+const evenRun = buildTargets(cs.score).map((t, i) => ({ ...t, grade: 'perfect' as const, dtMs: i % 2 ? 8 : -8 }));
+ok(drillPasses(drillById('gamme-do-md')!, { accuracy: 1, assisted: false, legato: 0.9 }, analyzeDrill(evenRun, cs.crossings)), 'drill: an even, legato run passes');
+ok(!drillPasses(drillById('gamme-do-md')!, { accuracy: 1, assisted: false, legato: 0.5 }, analyzeDrill(evenRun, cs.crossings)), 'drill: a choppy run does not');
+const cad = drillScore(drillById('cadence-do-mg')!);
+const spreadRun = buildTargets(cad.score).map((t) => ({ ...t, grade: 'perfect' as const, dtMs: t.midi % 3 === 0 ? 50 : 0 }));
+ok(analyzeDrill(spreadRun, cad.crossings).chordSpreadMs === 50, 'drill: chord spread measured');
+// Tempo: up after a clean run at tempo, capped at the goal, unchanged otherwise.
+const dm: SessionMetrics = { mode: 'rhythm', accuracy: 1, timingMs: 10, tempo: 50, attempts: [], confusions: [], assisted: false };
+let dp = recordDrill(emptyProgress(), 'gamme-do-md', dm, true, 50, 50, 100, 4);
+ok(dp.raisedTo === 54 && dp.progress.technique['gamme-do-md'].bpm === 54, 'drill tempo: +4 after a clean run');
+dp = recordDrill(dp.progress, 'gamme-do-md', dm, true, 50, 50, 100, 4);
+ok(dp.raisedTo === undefined && dp.progress.technique['gamme-do-md'].bpm === 54, 'drill tempo: a clean run below the tempo does not raise it');
+dp = recordDrill(dp.progress, 'gamme-do-md', dm, false, 54, 50, 100, 4);
+ok(dp.progress.technique['gamme-do-md'].bpm === 54, 'drill tempo: a messy run keeps it');
+dp = recordDrill(dp.progress, 'gamme-do-md', dm, true, 100, 50, 100, 4);
+ok(dp.progress.technique['gamme-do-md'].bpm === 100 && dp.reachedNow, 'drill tempo: capped at the goal, goal reached');
+// Daily drill: gated by lessons, least recently played first, finished ones left out.
+const fresh = emptyProgress();
+ok(availableDrills(fresh).every((d) => !d.after), 'drills: gated ones wait for their lesson');
+ok(drillOfTheDay(fresh)?.id === 'gamme-do-md', 'drills: the first one comes first');
+ok(drillOfTheDay(dp.progress)?.id === 'gamme-do-mg', 'drills: a drill at its goal leaves the rotation');
+ok(dailyPlan(fresh).some((a) => a.kind === 'technique'), 'daily plan: one technique drill');
 
 // --- Generator, every lesson ---
 for (const l of LESSONS) {

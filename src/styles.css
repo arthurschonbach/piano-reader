@@ -172,6 +172,8 @@ button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent);
   transition: opacity 200ms;
 }
 .strip-mask.peek { opacity: 0.12; }
+.tempo-bar { height: 4px; border-radius: 2px; background: var(--line); margin-top: 6px; overflow: hidden; max-width: 240px; }
+.tempo-bar > span { display: block; height: 100%; background: var(--accent); }
 .feedback {
   /* Fixed height: a longer message must never resize the score above it. */
   text-align: center; height: 3.2em; padding: 4px 16px; font-size: 1.1rem; font-weight: 600; line-height: 1.3;

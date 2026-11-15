@@ -4,7 +4,7 @@ import { ScrollStrip } from '../core/scroller';
 import { dynamicsByMeasure, measureAt, noteName, spellOfMidi, type NoteItem, type Score } from '../core/model';
 import { summarizeTouch, type TouchNote, type TouchSummary } from '../exercise/touch';
 import { buildSteps, summarize, WaitSession, type StepResult, type Summary } from '../exercise/wait';
-import { buildTargets, RhythmSession, summarizeRhythm, WINDOWS, type RhythmSummary } from '../exercise/rhythm';
+import { buildTargets, RhythmSession, summarizeRhythm, WINDOWS, type RhythmSummary, type Target } from '../exercise/rhythm';
 import { mountKeyboard } from '../input/keyboard';
 import type { NoteAttempt, SessionMetrics } from '../progress/store';
 import type { App } from './app';
@@ -45,6 +45,8 @@ export interface Outcome {
   metrics: SessionMetrics;
   wait?: Summary & { results: StepResult[] };
   rhythm?: RhythmSummary;
+  /** Rhythm mode: every written note with how it was played. */
+  targets?: Target[];
   touch: TouchSummary;
   /** The piano sent velocities (not the on-screen keys). */
   felt: boolean;
@@ -358,6 +360,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
           held: touch.held, balance: touch.balance, contrast: touch.contrast, dynAccuracy: touch.dynAccuracy
         },
         rhythm: s,
+        targets: r.targets,
         touch,
         felt: sawVelocity,
         stoppedEarly

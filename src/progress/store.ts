@@ -41,6 +41,16 @@ export interface PieceRecord {
   sessions: SessionRecord[];
 }
 
+export interface DrillRecord {
+  /** Tempo to play at next. */
+  bpm: number;
+  /** Fastest clean run. */
+  best: number;
+  /** Day the goal tempo was first reached cleanly. */
+  reached?: string;
+  sessions: SessionRecord[];
+}
+
 export interface Progress {
   version: 3;
   notes: Record<string, NoteStat>;
@@ -48,6 +58,8 @@ export interface Progress {
   confusions: Record<string, number>;
   lessons: Record<string, LessonRecord>;
   pieces: Record<string, PieceRecord>;
+  /** Technique drills, by id. */
+  technique: Record<string, DrillRecord>;
   /** Days with practice, "YYYY-MM-DD". */
   days: string[];
   placement?: { date: number; passed: string[]; stoppedAt: string | null };
@@ -63,6 +75,7 @@ export const emptyProgress = (): Progress => ({
   confusions: {},
   lessons: {},
   pieces: {},
+  technique: {},
   days: [],
   onboarded: false
 });
@@ -212,6 +225,46 @@ export function recordPiece(
     }
   }
   return { progress: p, advanced, learnt };
+}
+
+export interface DrillRecorded {
+  progress: Progress;
+  /** New tempo after a clean run at (or above) the current one. */
+  raisedTo?: number;
+  /** The goal tempo was reached for the first time. */
+  reachedNow: boolean;
+}
+
+/**
+ * Record a run of a technique drill. A clean run at the current tempo or
+ * faster moves the tempo up one step, up to the goal; anything else keeps it.
+ */
+export function recordDrill(
+  prev: Progress,
+  id: string,
+  m: SessionMetrics,
+  clean: boolean,
+  played: number,
+  start: number,
+  goal: number,
+  step: number,
+  now = Date.now()
+): DrillRecorded {
+  const p = recordPractice(prev, m, now);
+  const rec = (p.technique[id] ??= { bpm: start, best: 0, sessions: [] });
+  rec.sessions = [...rec.sessions, toRecord(m, clean, now)].slice(-KEEP_SESSIONS);
+  let raisedTo: number | undefined;
+  let reachedNow = false;
+  if (clean && played >= rec.bpm - 0.5) {
+    rec.best = Math.max(rec.best, played);
+    const next = Math.min(goal, played + step);
+    if (next > rec.bpm) raisedTo = rec.bpm = next;
+    if (played >= goal - 0.5 && !rec.reached) {
+      rec.reached = dayKey(now);
+      reachedNow = true;
+    }
+  }
+  return { progress: p, raisedTo, reachedNow };
 }
 
 export function pieceDue(rec: PieceRecord | undefined, stageCount: number, now = Date.now()): boolean {
