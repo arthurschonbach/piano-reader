@@ -8,7 +8,7 @@ import { createApp } from './ui/app';
 import { renderHome } from './ui/home';
 import { renderLibrary, renderPiece } from './ui/library';
 import { renderGlossary } from './ui/glossary';
-import { renderPieceStage, renderPlacement, renderProgress, renderSession, renderSettings } from './ui/screens';
+import { renderPieceLoop, renderPieceStage, renderPlacement, renderProgress, renderSession, renderSettings } from './ui/screens';
 
 const root = document.getElementById('app') as HTMLElement;
 const app = createApp();
@@ -24,6 +24,8 @@ function route(): void {
   let m: RegExpExecArray | null;
   if ((m = /^#\/lecon\/([\w-]+)$/.exec(hash)) && lessonById(m[1])) {
     cleanup = playLesson(root, app, lessonById(m[1])!, { onExit: home });
+  } else if ((m = /^#\/morceau\/([\w-]+)\/boucle$/.exec(hash))) {
+    cleanup = renderPieceLoop(root, app, m[1]);
   } else if ((m = /^#\/morceau\/([\w-]+)\/(\d+)$/.exec(hash))) {
     cleanup = renderPieceStage(root, app, m[1], Number(m[2]));
   } else if ((m = /^#\/morceau\/([\w-]+)$/.exec(hash))) {

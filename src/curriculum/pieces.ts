@@ -1,10 +1,12 @@
-import { makeNote, spellOfMidi, type Measure, type NoteItem, type Score } from '../core/model';
+import { computeTies, makeNote, spellOfMidi, type Measure, type NoteItem, type Score } from '../core/model';
 
 /**
  * Real pieces: public-domain melodies, with a simple left hand written for this
  * app. Notation per hand: bars split by "|", notes like "E4q@3" = pitch + octave,
  * length (w=4 h=2 q=1 e=½ dq=1½ dh=3, in quarter-note beats), optional @finger.
  * Rests: "rq", "rh", "rw", "re", "rdh". Sharps/flats: "F#4q", "Bb2h".
+ * Chords: pitches joined by "+", the length on the last one: "B3+D4+F#4h".
+ * A "~" at the end ties the note to the next one of that hand: "F#4dh~ | F#4dh".
  */
 export interface Piece {
   id: string;
@@ -213,7 +215,91 @@ export const PIECES: Piece[] = [
     rh: 'F#5h@5 E5h@4 | D5h@3 C#5h@2 | B4h@2 A4h@1 | B4h@2 C#5h@3 | F#5h@5 E5h@4 | D5h@3 C#5h@2 | B4h@2 A4h@1 | B4h@2 C#5h@3 | D5w@4',
     lh: 'D3h@1 A2h@4 | B2h@3 F#2h@5 | G2h@4 D2h@5 | G2h@3 A2h@2 | D3h@1 A2h@4 | B2h@3 F#2h@5 | G2h@4 D2h@5 | G2h@3 A2h@2 | D3w@1'
   },
+  {
+    id: 'greensleeves',
+    title: 'Greensleeves',
+    origin: 'Chanson anglaise traditionnelle (XVIe siècle) · main gauche écrite pour l’app',
+    level: 3,
+    bpm: 100,
+    keyFifths: 0,
+    time: [3, 4],
+    pickup: 1,
+    setup: 'La mineur (A minor) : pas d’armure, mais des G♯ et un F♯ écrits devant les notes. Main droite : pouce sur le A4 au-dessus du C central.',
+    tips: [
+      'Le rythme « noire pointée, croche, noire » revient sans cesse : compte « 1 — 2 et 3 ».',
+      'Le G est tantôt naturel (mesures 4 et 12), tantôt dièse (mesures 6, 7 et 14) : lis bien chaque altération.',
+      'Main gauche : une seule note par mesure, la basse de l’accord.'
+    ],
+    rh:
+      'A4q@1 | C5h@2 D5q@3 | E5dq@4 F5e@5 E5q@4 | D5h B4q | G4dq A4e B4q | C5h A4q | A4dq G#4e A4q | B4h G#4q | E4h A4q | ' +
+      'C5h D5q | E5dq F5e E5q | D5h B4q | G4dq A4e B4q | C5dq B4e A4q | G#4dq F#4e G#4q | A4dh',
+    lh: 'rq | A2dh@5 | C3dh | G2dh | E2dh | A2dh | F2dh | E2dh | E2dh | A2dh | C3dh | G2dh | E2dh | A2dh | E2dh | A2dh'
+  },
+  {
+    id: 'prelude-do-bach',
+    title: 'Prélude en C (début)',
+    origin: 'J.-S. Bach, Clavier bien tempéré I, BWV 846 · valeurs doublées (croches au lieu de doubles croches)',
+    level: 3,
+    bpm: 60,
+    keyFifths: 0,
+    setup: 'Main gauche autour du C central (lue en clé de fa, au-dessus de la portée), main droite : pouce sur le G4.',
+    tips: [
+      'Chaque mesure est un accord brisé : la main gauche joue les deux notes graves et les tient, la main droite répète trois notes deux fois.',
+      'Lis l’accord d’un coup avant chaque mesure : les doigts gardent la même forme pendant toute la mesure.',
+      'Les accords : C, C, Ré mineur sur C, puis G7 sur B, et retour à C. C’est la cadence I-II-V-I.',
+      'Les notes graves sont liées : ne les rejoue pas, garde les touches enfoncées.'
+    ],
+    rh:
+      'rq G4e@1 C5e E5e G4e C5e E5e | rq G4e C5e E5e G4e C5e E5e | rq A4e@1 D5e F5e A4e D5e F5e | rq A4e D5e F5e A4e D5e F5e | ' +
+      'rq G4e@1 D5e F5e G4e D5e F5e | rq G4e D5e F5e G4e D5e F5e | rq G4e C5e E5e G4e C5e E5e | rq G4e C5e E5h',
+    lh:
+      'C4e E4dq~ E4h | C4e E4dq~ E4h | C4e D4dq~ D4h | C4e D4dq~ D4h | ' +
+      'B3e D4dq~ D4h | B3e D4dq~ D4h | C4e E4dq~ E4h | C4e E4dq~ E4h'
+  },
   // ---------------------------------------------------------------- level 4
+  {
+    id: 'lettre-a-elise',
+    title: 'Lettre à Élise (thème)',
+    origin: 'L. van Beethoven, Für Elise, WoO 59 · valeurs doublées (3/4 en croches au lieu de 3/8 en doubles croches)',
+    level: 4,
+    bpm: 84,
+    keyFifths: 0,
+    time: [3, 4],
+    pickup: 1,
+    setup: 'La mineur. Main droite : 5e doigt sur le E5 (le dernier interligne en haut de la clé de sol), 4e doigt sur le D♯ juste à gauche.',
+    tips: [
+      'Le célèbre balancement E-D♯-E-D♯ : 5-4-5-4, poignet souple, sans appuyer.',
+      'Les deux mains se passent le relais : la main gauche monte l’accord (A-E-A), la droite continue en partant du C central.',
+      'Mesures 3 et 7 : G♯ et D♯ sont écrits, rien à l’armure. Ce sont les notes de E majeur, l’accord qui ramène vers A mineur.',
+      'Dans l’original, ces 8 mesures sont jouées deux fois avant la partie centrale.'
+    ],
+    rh:
+      'E5e@5 D#5e@4 | E5e@5 D#5e@4 E5e@5 B4e@2 D5e@4 C5e@3 | A4q@1 re C4e@1 E4e@2 A4e@3 | B4q@4 re E4e@1 G#4e@3 B4e@4 | C5q@5 re E4e@1 E5e@5 D#5e@4 | ' +
+      'E5e D#5e E5e B4e D5e C5e | A4q re C4e E4e A4e | B4q re D4e C5e B4e | A4dh',
+    lh:
+      'rq | rdh | A2e@5 E3e@2 A3e@1 re rq | E2e E3e G#3e re rq | A2e@5 E3e@2 A3e@1 re rq | ' +
+      'rdh | A2e E3e A3e re rq | E2e E3e G#3e re rq | A2e E3e A3h'
+  },
+  {
+    id: 'gymnopedie-1',
+    title: 'Gymnopédie n°1 (début)',
+    origin: 'E. Satie, 1888',
+    level: 4,
+    bpm: 66,
+    keyFifths: 2,
+    time: [3, 4],
+    setup: 'Ré majeur à l’armure (F♯ et C♯). Main gauche : auriculaire sur le G2, puis un saut vers l’accord au-dessus du C3.',
+    tips: [
+      'Quatre mesures d’introduction à la main gauche seule : une basse grave, puis un accord. G, puis D, en alternance, du début à la fin.',
+      'Le saut de la main gauche est le cœur du morceau : regarde l’accord suivant pendant que tu joues la basse.',
+      'La mélodie arrive mesure 5, très calme. Le F♯ final est tenu quatre mesures : ne le rejoue pas.',
+      '« Lent et douloureux », dit Satie : aucune précipitation, laisse sonner.'
+    ],
+    rh: 'rdh | rdh | rdh | rdh | rq F#5q A5q | G5q F#5q C#5q | B4q C#5q D5q | A4dh | F#4dh~ | F#4dh~ | F#4dh~ | F#4dh',
+    lh:
+      'G2q@5 B3+D4+F#4h | D2q@5 A3+C#4+F#4h | G2q B3+D4+F#4h | D2q A3+C#4+F#4h | G2q B3+D4+F#4h | D2q A3+C#4+F#4h | ' +
+      'G2q B3+D4+F#4h | D2q A3+C#4+F#4h | G2q B3+D4+F#4h | D2q A3+C#4+F#4h | G2q B3+D4+F#4h | D2q A3+C#4+F#4h'
+  },
   {
     id: 'hymne-joie-complet',
     title: 'Hymne à la joie (complet)',
@@ -268,9 +354,21 @@ interface Tok {
   octave: number;
   dur: number;
   finger?: number;
+  /** Other notes struck with this one (a chord), low to high. */
+  with?: Tok[];
+  /** Tied to the next note of the same hand. */
+  tie?: boolean;
 }
 
 function parseTok(t: string): Tok {
+  if (t.endsWith('~')) return { ...parseTok(t.slice(0, -1)), tie: true };
+  if (t.includes('+')) {
+    const parts = t.split('+');
+    const last = parseTok(parts[parts.length - 1]);
+    const others = parts.slice(0, -1).map((p) => parseTok(`${p}${Object.keys(LEN).find((k) => LEN[k] === last.dur)}`));
+    const all = [...others, last].sort((a, b) => (a.midi ?? 0) - (b.midi ?? 0));
+    return { ...all[0], dur: last.dur, finger: last.finger, with: all.slice(1) };
+  }
   const rest = /^r(dq|dh|w|h|q|e)$/.exec(t);
   if (rest) return { midi: null, step: 0, alter: 0, octave: 4, dur: LEN[rest[1]] };
   const m = /^([A-G])([#b]?)(\d)(dq|dh|w|h|q|e)(?:@([1-5]))?$/.exec(t);
@@ -285,7 +383,7 @@ export function parseHand(src: string): Tok[][] {
   return src.split('|').map((bar) => bar.trim().split(/\s+/).filter(Boolean).map(parseTok));
 }
 
-export const beatsPerBar = (p: Piece): number => (p.time ?? [4, 4])[0];
+export const beatsPerBar = (p: Piece): number => ((p.time ?? [4, 4])[0] * 4) / (p.time ?? [4, 4])[1];
 
 export type PieceHands = 'rh' | 'lh' | 'both';
 
@@ -296,6 +394,8 @@ export function pieceScore(p: Piece, hands: PieceHands): Score {
   const grand = hands === 'both';
   const time = p.time ?? [4, 4];
   let start = 0;
+  // A tie carries on from bar to bar, one flag per hand.
+  const tied: Record<number, boolean> = {};
   const measures: Measure[] = rh.map((_, i) => {
     const notes: NoteItem[] = [];
     const length = Math.max(...[rh[i], lh[i]].map((bar) => (bar ?? []).reduce((a, t) => a + t.dur, 0)));
@@ -305,7 +405,14 @@ export function pieceScore(p: Piece, hands: PieceHands): Score {
         const spell = k.midi === null ? spellOfMidi(60) : { step: k.step, alter: k.alter, octave: k.octave };
         const base = k.dur === 1.5 ? 1 : k.dur === 3 ? 2 : k.dur;
         const dots = k.dur === 1.5 || k.dur === 3 ? 1 : 0;
-        notes.push(makeNote({ beat: t, dur: k.dur, base, dots, staff, rest: k.midi === null, midi: k.midi ?? 60, spell, finger: k.finger }));
+        const n = makeNote({ beat: t, dur: k.dur, base, dots, staff, rest: k.midi === null, midi: k.midi ?? 60, spell, finger: k.finger });
+        n.tieStop = !!tied[staff] && k.midi !== null;
+        n.tieStart = !!k.tie && k.midi !== null;
+        tied[staff] = n.tieStart;
+        notes.push(n);
+        for (const c of k.with ?? []) {
+          notes.push(makeNote({ beat: t, dur: k.dur, base, dots, staff, midi: c.midi!, spell: { step: c.step, alter: c.alter, octave: c.octave }, chord: true }));
+        }
         t += k.dur;
       }
     };
@@ -315,7 +422,7 @@ export function pieceScore(p: Piece, hands: PieceHands): Score {
     start += length;
     return m;
   });
-  return {
+  const score: Score = {
     title: p.title,
     bpm: p.bpm,
     measures,
@@ -323,6 +430,8 @@ export function pieceScore(p: Piece, hands: PieceHands): Score {
     staves: grand ? 2 : 1,
     clefs: grand ? ['G', 'F'] : [hands === 'lh' ? 'F' : 'G']
   };
+  computeTies(score);
+  return score;
 }
 
 export function pieceById(id: string): Piece | undefined {
@@ -339,6 +448,8 @@ export function pieceTags(p: Piece): string[] {
   if (p.pickup) tags.push('levée');
   if (toks.some((t) => t.dur === 0.5)) tags.push('croches');
   if (toks.some((t) => t.dur === 1.5 || t.dur === 3)) tags.push('notes pointées');
+  if (toks.some((t) => t.with?.length)) tags.push('accords');
+  if (toks.some((t) => t.tie)) tags.push('liaisons');
   const rhMidis = parseHand(p.rh).flat().map((t) => t.midi).filter((m): m is number => m !== null);
   const span = Math.max(...rhMidis) - Math.min(...rhMidis);
   if (span > 9) tags.push('la main se déplace');
@@ -362,3 +473,55 @@ export const PIECE_STAGES: PieceStage[] = [
   { id: 'lent', label: 'Mains ensemble, tempo lent', hands: 'both', mode: 'rhythm', tempo: 0.75 },
   { id: 'tempo', label: 'Mains ensemble, au tempo', hands: 'both', mode: 'rhythm', tempo: 1 }
 ];
+
+/**
+ * Bars that went wrong, worst first: `errorBeats` lists where something went
+ * wrong (a wrong key, a hesitation, a missed or late note, a note let go early).
+ */
+export function weakBars(score: Score, errorBeats: number[]): number[] {
+  const count = new Map<number, number>();
+  for (const b of errorBeats) {
+    const i = score.measures.findIndex((m) => b >= m.startBeat - 1e-9 && b < m.startBeat + m.length - 1e-9);
+    if (i >= 0) count.set(i, (count.get(i) ?? 0) + 1);
+  }
+  return [...count.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0]).map(([i]) => i);
+}
+
+/**
+ * The passage to loop: the worst bar, its weak neighbours (three bars at most),
+ * and at least two bars so the way in or out of the hard spot is practised too.
+ */
+export function loopRange(score: Score, weak: number[]): [number, number] | null {
+  if (!weak.length) return null;
+  const set = new Set(weak);
+  let a = weak[0];
+  let b = weak[0];
+  while (set.has(b + 1) && b - a < 2) b++;
+  while (set.has(a - 1) && b - a < 2) a--;
+  if (b === a) {
+    if (b + 1 < score.measures.length) b++;
+    else if (a > 0) a--;
+  }
+  return [a, b];
+}
+
+/** Bars a..b of a score as a score of their own, keeping the printed bar numbers. */
+export function excerptScore(score: Score, a: number, b: number): Score {
+  const time = score.measures.find((m) => m.time)?.time ?? [4, 4];
+  const shift = score.measures[a].startBeat;
+  const measures: Measure[] = score.measures.slice(a, b + 1).map((m, k) => ({
+    ...m,
+    number: k + 1,
+    label: m.label ?? m.number,
+    startBeat: m.startBeat - shift,
+    keyChange: k === 0,
+    time: k === 0 ? time : null,
+    // A note tied in from before the excerpt is played, not held.
+    notes: m.notes.map((n) => ({ ...n, beat: n.beat - shift, tieEnd: n.tieEnd - shift, tieTarget: null, tieStop: k === 0 && Math.abs(n.beat - m.startBeat) < 1e-9 ? false : n.tieStop }))
+  }));
+  const last = measures[measures.length - 1];
+  for (const n of last.notes) if (n.tieStart && n.beat + n.dur >= last.startBeat + last.length - 1e-9) n.tieStart = false;
+  const out: Score = { ...score, title: `${score.title} · mesures ${measures[0].label}–${last.label}`, measures };
+  computeTies(out);
+  return out;
+}

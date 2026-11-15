@@ -5,9 +5,11 @@
 import { blockPasses, flashLesson, lessonDone, passes, sightReadingLesson } from '../curriculum/coach';
 import { generateExercise } from '../curriculum/generate';
 import { LESSONS, MASTERY, type Lesson, type TouchReq } from '../curriculum/lessons';
-import { PIECE_STAGES, pieceScore, type Piece } from '../curriculum/pieces';
+import { excerptScore, loopRange, PIECE_STAGES, pieceScore, weakBars, type Piece } from '../curriculum/pieces';
+import { buildSteps } from '../exercise/wait';
+import type { Score } from '../core/model';
 import { analyzeDrill, BPM_STEP, DRILL_PASS, drillPasses, drillScore, type Drill } from '../curriculum/technique';
-import { recordDrill, recordLesson, recordPiece, recordPractice, validatedDays, weaknessMap } from '../progress/store';
+import { recordDrill, recordLesson, recordPiece, recordPractice, setPieceWeak, validatedDays, weaknessMap } from '../progress/store';
 import type { App } from './app';
 import { percent, resultCard, seconds, type CardAction, type StatLine } from './dom';
 import { mountPlayer, nameOf, type Outcome } from './player';
@@ -256,7 +258,10 @@ export function playPieceStage(root: HTMLElement, app: App, piece: Piece, stageI
     onFinish: (o, show) => {
       const ok = passes(stage.mode, o.metrics, target);
       const rec = recordPiece(app.progress, piece.id, stageIndex, stage.id, PIECE_STAGES.length, o.metrics, ok);
-      app.setProgress(rec.progress);
+      // Where it stumbled: kept for a loop on those bars, forgotten once the stage passes.
+      const range = ok ? null : loopRange(score, weakBars(score, errorBeats(score, o)));
+      app.setProgress(setPieceWeak(rec.progress, piece.id, range ? { stage: stageIndex, bars: range } : null));
+      rec.progress = app.progress;
       const r = rec.progress.pieces[piece.id];
       const notes: string[] = [];
       if (o.metrics.assisted) notes.push('Noms des notes affichés : non compté.');
@@ -268,6 +273,18 @@ export function playPieceStage(root: HTMLElement, app: App, piece: Piece, stageI
         !hooks.next && rec.advanced && !rec.learnt
           ? [{ label: `Étape suivante`, primary: true, onClick: () => { cleanup(); cleanup = playPieceStage(root, app, piece, r.stage, hooks); } }]
           : [];
+      if (range && !review) {
+        const [a, b] = range.map((i) => score.measures[i].label ?? score.measures[i].number);
+        notes.push(`Ça accroche surtout mesures ${a} à ${b} : travaille-les en boucle, puis reviens au morceau entier.`);
+        extra.unshift({
+          label: `🔁 Boucler mesures ${a}–${b}`,
+          primary: !hooks.next,
+          onClick: () => {
+            cleanup();
+            cleanup = playLoop(root, app, piece, stageIndex, range, { ...hooks, next: undefined, onExit: () => { cleanup(); cleanup = playPieceStage(root, app, piece, stageIndex, hooks, review); } });
+          }
+        });
+      }
       show(
         resultCard({
           title: ok ? 'Étape validée ✓' : 'Pas encore',
@@ -342,6 +359,96 @@ export function playDrill(root: HTMLElement, app: App, drill: Drill, hooks: Hook
           notes,
           list: { heading: 'Tes confusions', items: confusionItems(o) },
           actions: actions(hooks, again)
+        })
+      );
+    }
+  });
+  return () => cleanup();
+}
+
+/** Beats where something went wrong in a run: wrong keys, hesitations, missed or late notes, notes let go early. */
+export function errorBeats(score: Score, o: Outcome): number[] {
+  if (o.wait) {
+    const steps = buildSteps(score);
+    return o.wait.results.flatMap((r, i) => (r.wrong.length || r.hinted || r.reactionMs > 2500 ? [steps[i].beat] : []));
+  }
+  const timing = (o.targets ?? []).filter((t) => t.grade === 'miss' || t.grade === 'good').map((t) => t.beat);
+  return [...timing, ...o.touch.shortAt];
+}
+
+/** Loop passes needed: three clean ones in a row, the last at full tempo. */
+export const LOOP_CLEAN = 3;
+
+/**
+ * A few bars of a piece, again and again. In rhythm stages the loop starts at
+ * 70 % of the stage tempo and rises 10 % after each clean pass.
+ */
+export function playLoop(
+  root: HTMLElement,
+  app: App,
+  piece: Piece,
+  stageIndex: number,
+  range: [number, number],
+  hooks: Hooks,
+  state = { streak: 0, bpm: 0 }
+): () => void {
+  const stage = PIECE_STAGES[stageIndex];
+  const full = pieceScore(piece, stage.hands);
+  const score = excerptScore(full, range[0], range[1]);
+  const target = Math.round(piece.bpm * (stage.tempo ?? 1));
+  if (!state.bpm) state.bpm = Math.round(target * 0.7);
+  const [a, b] = range.map((i) => full.measures[i].label ?? full.measures[i].number);
+  let cleanup = () => undefined as void;
+  const again = () => {
+    cleanup();
+    cleanup = playLoop(root, app, piece, stageIndex, range, hooks, state);
+  };
+  cleanup = mountPlayer(root, app, {
+    title: `${piece.title} · boucle ${a}–${b}`,
+    score,
+    mode: stage.mode,
+    bpm: state.bpm,
+    targetBpm: stage.mode === 'rhythm' ? state.bpm : undefined,
+    intro: {
+      heading: `Boucle · mesures ${a} à ${b}`,
+      paragraphs: [
+        'Les mesures où ça a accroché, et leur voisine pour travailler l’enchaînement.',
+        stage.mode === 'rhythm'
+          ? `On commence plus lentement (${state.bpm} bpm) ; chaque passage propre accélère de 10 %, jusqu’à ${target} bpm.`
+          : 'Sans tempo : vise la justesse du premier coup, sans hésiter.',
+        `Il faut ${LOOP_CLEAN} passages propres d’affilée${stage.mode === 'rhythm' ? ', le dernier au tempo' : ''}.`
+      ],
+      setup: piece.setup
+    },
+    onExit: hooks.onExit,
+    onFinish: (o, show) => {
+      app.setProgress(recordPractice(app.progress, o.metrics));
+      const clean = passes(stage.mode, o.metrics, stage.mode === 'rhythm' ? state.bpm : undefined);
+      const played = o.metrics.tempo ?? state.bpm;
+      if (clean) state.streak++;
+      else state.streak = 0;
+      const atTempo = stage.mode === 'wait' || played >= target;
+      const done = clean && state.streak >= LOOP_CLEAN && atTempo;
+      if (clean && stage.mode === 'rhythm') state.bpm = Math.min(target, Math.max(state.bpm, played) + Math.round(target * 0.1));
+      if (done) app.setProgress(setPieceWeak(app.progress, piece.id, null));
+      const notes = [
+        done
+          ? 'Ces mesures passent maintenant. Rejoue le morceau entier : elles doivent tenir dans le contexte.'
+          : clean
+            ? `Propre (${state.streak} / ${LOOP_CLEAN} d’affilée).${stage.mode === 'rhythm' ? ` Prochain passage à ${state.bpm} bpm.` : ''}`
+            : 'Pas encore propre : on recommence au même tempo. Ralentis si besoin.',
+        ...rhythmNotes(o),
+        ...touchNotes(o)
+      ];
+      show(
+        resultCard({
+          title: done ? 'Boucle réussie ✓' : clean ? 'Passage propre ✓' : 'Encore une fois',
+          stats: statsFor(o, stage.mode === 'rhythm' ? target : undefined),
+          notes,
+          list: { heading: 'Tes confusions', items: confusionItems(o) },
+          actions: done
+            ? [{ label: 'Rejouer le morceau entier', primary: true, onClick: hooks.onExit }, ...(hooks.next ? [{ label: hooks.next.label, onClick: hooks.next.go }] : [])]
+            : [{ label: 'Encore', primary: true, onClick: again }, ...(hooks.next ? [{ label: hooks.next.label, onClick: hooks.next.go }] : []), { label: 'Arrêter la boucle', onClick: hooks.onExit }]
         })
       );
     }

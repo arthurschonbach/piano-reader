@@ -8,7 +8,7 @@ import { buildSteps, type StepResult } from '../exercise/wait';
 import {
   emptyProgress, exportProgress, importProgress, recordPlacement, recordPractice, streak, validatedDays, weaknessMap
 } from '../progress/store';
-import { playDrill, playFlash, playLesson, playPieceStage, playSight, type Hooks } from './activities';
+import { playDrill, playFlash, playLesson, playLoop, playPieceStage, playSight, type Hooks } from './activities';
 import { drillById } from '../curriculum/technique';
 import { renderEar } from './ear';
 import type { App } from './app';
@@ -42,6 +42,15 @@ export function renderSession(root: HTMLElement, app: App): () => void {
         return playDrill(root, app, drillById(a.drillId)!, hooks);
       case 'ear':
         return renderEar(root, app, hooks);
+      case 'loop': {
+        const weak = app.progress.pieces[a.pieceId]?.weak;
+        // Already sorted out since the plan was made: go straight on.
+        if (!weak) {
+          window.setTimeout(() => hooks.next?.go(), 0);
+          return () => undefined;
+        }
+        return playLoop(root, app, pieceById(a.pieceId)!, weak.stage, weak.bars, hooks);
+      }
       case 'sight':
         return playSight(root, app, hooks);
       case 'lesson':
@@ -168,6 +177,16 @@ export function renderPieceStage(root: HTMLElement, app: App, id: string, stage:
   }
   const learnt = (app.progress.pieces[piece.id]?.stage ?? 0) >= PIECE_STAGES.length;
   return playPieceStage(root, app, piece, stage, { onExit: () => app.go(`#/morceau/${piece.id}`) }, learnt && stage === PIECE_STAGES.length - 1);
+}
+
+export function renderPieceLoop(root: HTMLElement, app: App, id: string): () => void {
+  const piece = pieceById(id);
+  const weak = piece ? app.progress.pieces[piece.id]?.weak : undefined;
+  if (!piece || !weak) {
+    app.go(piece ? `#/morceau/${id}` : '#/');
+    return () => undefined;
+  }
+  return playLoop(root, app, piece, weak.stage, weak.bars, { onExit: () => app.go(`#/morceau/${piece.id}`) });
 }
 
 // ---------------------------------------------------------------- progress

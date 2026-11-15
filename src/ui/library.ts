@@ -183,6 +183,14 @@ export function renderPiece(root: HTMLElement, app: App, id: string): () => void
     ol.append(li);
   });
   page.append(ol);
+  if (r?.weak) {
+    const sc = pieceScore(piece, PIECE_STAGES[r.weak.stage].hands);
+    const [a, b] = r.weak.bars.map((i) => sc.measures[i]?.label ?? sc.measures[i]?.number ?? i + 1);
+    page.append(
+      h('p', 'note', `Au dernier essai (${PIECE_STAGES[r.weak.stage].label.toLowerCase()}), ça accrochait mesures ${a} à ${b}.`),
+      button(`🔁 Boucler mesures ${a}–${b}`, 'btn', () => app.go(`#/morceau/${piece.id}/boucle`))
+    );
+  }
   if (stage >= PIECE_STAGES.length) {
     page.append(h('p', 'note', `✓ Appris. ${r?.due ? `Prochaine révision le ${r.due.split('-').reverse().join('/')}` : ''} (${r?.reviews ?? 0} révision${(r?.reviews ?? 0) > 1 ? 's' : ''} réussie${(r?.reviews ?? 0) > 1 ? 's' : ''}).`));
   }

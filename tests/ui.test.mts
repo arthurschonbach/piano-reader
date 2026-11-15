@@ -179,6 +179,31 @@ const startExercise = async (page: Page) => {
     ok(!!rt && rt.includes('Séance validée') && rt.includes('100 %notes tenues'), `${id}: validated when played and held in time (${rt?.slice(0, 160)})`);
   }
 
+  // Piece with mistakes in bar 3: the loop on bars 3-4 is offered and opens.
+  await page.goto('http://localhost:5199/#/morceau/hymne-joie/0');
+  await startExercise(page);
+  await page.evaluate(async () => {
+    const w = window as unknown as { __midi: (s: number, n: number, v: number) => void };
+    const ex = document.querySelector('.ex') as HTMLElement;
+    let guard = 0;
+    while (ex.dataset.expected && ex.dataset.phase === 'play' && guard++ < 400) {
+      const ms = ex.dataset.expected.split(',').map(Number);
+      const bar = Number(document.querySelector('.count')?.textContent?.split(' / ')[0] ?? 0);
+      // Steps 8 to 11 are bar 3 of the melody (four quarter notes per bar): two wrong keys each.
+      if (bar >= 8 && bar < 12) for (const k of [1, 2]) w.__midi(0x90, ms[0] + k, 80), w.__midi(0x80, ms[0] + k, 0);
+      for (const m of ms) w.__midi(0x90, m, 80);
+      for (const m of ms) w.__midi(0x80, m, 0);
+      await new Promise((r) => setTimeout(r, 15));
+    }
+  });
+  await page.waitForSelector('.results');
+  const loopBtn = page.locator('.results .btn', { hasText: 'Boucler mesures 3–4' });
+  ok((await loopBtn.count()) === 1, `piece: loop on the bars that went wrong is offered (${(await page.textContent('.results'))?.slice(0, 160)})`);
+  await loopBtn.click();
+  ok((await page.textContent('.card.intro h2')) === 'Boucle · mesures 3 à 4', 'piece: loop opens on those bars');
+  await page.goto('http://localhost:5199/#/morceau/hymne-joie');
+  ok((await page.locator('.btn', { hasText: 'Boucler mesures 3–4' }).count()) === 1, 'piece page: pending loop shown');
+
   // Ear training: eight phrases played back right first time move the level up.
   await page.goto('http://localhost:5199/#/oreille');
   await page.click('text=C’est parti');

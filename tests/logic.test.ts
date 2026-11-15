@@ -8,11 +8,11 @@ import { analyzeDrill, DRILLS, drillById, drillPasses, drillScore } from '../src
 import { availableDrills, drillOfTheDay } from '../src/curriculum/coach';
 import { dictationScore, EAR_LEVELS, EarTry, makeDictation, nextEarLevel } from '../src/curriculum/ear';
 import { LESSONS, lessonNotes } from '../src/curriculum/lessons';
-import { PIECES, PIECE_STAGES, beatsPerBar, parseHand, pieceScore, pieceTags } from '../src/curriculum/pieces';
+import { PIECES, PIECE_STAGES, beatsPerBar, excerptScore, loopRange, parseHand, pieceScore, pieceTags, weakBars } from '../src/curriculum/pieces';
 import { blockPasses, currentLesson, currentPiece, dailyPlan, flashLesson, knownHands, passes, sightReadingLesson } from '../src/curriculum/coach';
 import {
   addDays, dayKey, emptyProgress, exportProgress, importProgress, migrate, recordLesson, recordPiece, recordPlacement,
-  recordDrill, recordEar, recordPractice, streak, validatedDays, weakestNotes, weaknessMap, type SessionMetrics
+  recordDrill, recordEar, recordPractice, setPieceWeak, streak, validatedDays, weakestNotes, weaknessMap, type SessionMetrics
 } from '../src/progress/store';
 import { dynamicsByMeasure, noteName, makeNote, spellOfMidi, type Score } from '../src/core/model';
 import { summarizeTouch, type TouchNote } from '../src/exercise/touch';
@@ -338,6 +338,31 @@ for (const pc of PIECES) {
   ok(buildTargets(both).length > 20, `${pc.title}: playable in rhythm mode`);
 }
 ok(PIECE_STAGES.length === 5 && PIECE_STAGES[0].hands === 'rh' && PIECE_STAGES[4].tempo === 1, 'piece stages: hands apart to full tempo');
+// Chords and ties in piece notation.
+const gym = pieceScore(PIECES.find((p) => p.id === 'gymnopedie-1')!, 'both');
+ok(buildSteps({ ...gym, measures: [gym.measures[0]] }).some((st) => st.midis.join() === '59,62,66'), 'pieces: a chord token gives three notes struck together');
+const gymTargets = buildTargets(gym).filter((t) => t.note.staff === 0);
+ok(gymTargets.filter((t) => t.midi === 66).length === 1 && gymTargets.find((t) => t.midi === 66)!.note.tieEnd === gym.measures[11].startBeat + 3, 'pieces: a note tied over four bars is played once and held to the end');
+ok(pieceTags(PIECES.find((p) => p.id === 'gymnopedie-1')!).includes('accords') && pieceTags(PIECES.find((p) => p.id === 'prelude-do-bach')!).includes('liaisons'), 'pieces: chord and tie tags');
+// Loops on the bars that went wrong.
+const lsc = pieceScore(PIECES.find((p) => p.id === 'hymne-joie')!, 'both');
+const at = (bar: number, off = 0) => lsc.measures[bar].startBeat + off;
+ok(weakBars(lsc, [at(5), at(5, 1), at(2), at(6)]).join() === '5,2,6', 'loop: bars ranked by errors');
+ok(loopRange(lsc, [5, 2, 6])?.join() === '5,6', 'loop: worst bar and its weak neighbour');
+ok(loopRange(lsc, [3])?.join() === '3,4', 'loop: a lone bar comes with the next one');
+ok(loopRange(lsc, [lsc.measures.length - 1])?.join() === `${lsc.measures.length - 2},${lsc.measures.length - 1}`, 'loop: the last bar comes with the one before');
+ok(loopRange(lsc, [4, 5, 6, 7, 3])?.join() === '3,5' || loopRange(lsc, [4, 5, 6, 7, 3])!.every((i) => i >= 3 && i <= 7), 'loop: three bars at most');
+ok(loopRange(lsc, []) === null, 'loop: nothing to loop');
+const ex = excerptScore(lsc, 4, 5);
+ok(ex.measures.length === 2 && ex.measures[0].startBeat === 0 && ex.measures[0].label === 5 && ex.measures[1].label === 6 && ex.measures[0].keyChange && ex.measures[0].time !== null, 'loop: excerpt starts at 0 and keeps bar numbers');
+const prel = pieceScore(PIECES.find((p) => p.id === 'prelude-do-bach')!, 'both');
+const exTie = excerptScore(prel, 0, 0);
+ok(buildTargets(exTie).length === buildTargets({ ...prel, measures: [prel.measures[0]] }).length && exTie.measures[0].notes.filter((n) => n.tieStop).every((n) => exTie.measures[0].notes.some((o) => o.tieTarget === n)), 'loop: no dangling ties in an excerpt');
+const exLater = excerptScore(PIECES.find((p) => p.id === 'gymnopedie-1') ? pieceScore(PIECES.find((p) => p.id === 'gymnopedie-1')!, 'rh') : prel, 9, 10);
+ok(buildTargets(exLater).length === 1 && buildTargets(exLater)[0].midi === 66, 'loop: a note tied in from before the excerpt is played');
+const wp = setPieceWeak(emptyProgress(), 'hymne-joie', { stage: 0, bars: [5, 6] });
+ok(wp.pieces['hymne-joie'].weak?.bars.join() === '5,6' && !setPieceWeak(wp, 'hymne-joie', null).pieces['hymne-joie'].weak, 'loop: weak bars saved and cleared');
+ok(dailyPlan({ ...wp, focusPiece: 'hymne-joie' }).some((a) => a.kind === 'loop'), 'daily plan: a pending loop comes before its piece');
 ok(PIECES.length >= 15 && [1, 2, 3, 4, 5].every((lv) => PIECES.some((p) => p.level === lv)), `library: ${PIECES.length} pieces covering levels 1 to 5`);
 ok(new Set(PIECES.map((p) => p.id)).size === PIECES.length, 'library: unique ids');
 const hb = PIECES.find((p) => p.id === 'joyeux-anniversaire')!;

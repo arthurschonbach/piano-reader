@@ -39,6 +39,8 @@ export interface PieceRecord {
   due?: string;
   reviews: number;
   sessions: SessionRecord[];
+  /** Bars to loop (indexes, first and last) after a run that stumbled, for that stage. */
+  weak?: { stage: number; bars: [number, number] };
 }
 
 export interface DrillRecord {
@@ -279,6 +281,15 @@ export function recordDrill(
 export function recordEar(prev: Progress, clean: number, total: number, nextLevel: number, now = Date.now()): Progress {
   const p = recordPractice(prev, { mode: 'wait', accuracy: total ? clean / total : 0, attempts: [], confusions: [], assisted: false }, now);
   p.ear = { level: nextLevel, sessions: [...p.ear.sessions, { date: now, level: p.ear.level, clean, total }].slice(-KEEP_SESSIONS) };
+  return p;
+}
+
+/** Remember (or forget, with null) the bars of a piece to loop. */
+export function setPieceWeak(prev: Progress, pieceId: string, weak: { stage: number; bars: [number, number] } | null): Progress {
+  const p: Progress = structuredClone(prev);
+  const rec = (p.pieces[pieceId] ??= emptyPiece());
+  if (weak) rec.weak = weak;
+  else delete rec.weak;
   return p;
 }
 

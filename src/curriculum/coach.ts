@@ -141,6 +141,7 @@ export type Activity =
   | { kind: 'flash'; label: string }
   | { kind: 'technique'; label: string; drillId: string }
   | { kind: 'ear'; label: string }
+  | { kind: 'loop'; label: string; pieceId: string }
   | { kind: 'sight'; label: string }
   | { kind: 'lesson'; label: string; lessonId: string; review: boolean }
   | { kind: 'piece'; label: string; pieceId: string; stage: number; review: boolean };
@@ -166,6 +167,8 @@ export function dailyPlan(p: Progress, now = Date.now()): Activity[] {
   const piece = currentPiece(p);
   if (piece) {
     const stage = p.pieces[piece.id]?.stage ?? 0;
+    const weak = p.pieces[piece.id]?.weak;
+    if (weak && weak.stage === stage) out.push({ kind: 'loop', label: `${piece.title} · boucle sur les mesures difficiles`, pieceId: piece.id });
     out.push({ kind: 'piece', label: `${piece.title} · ${PIECE_STAGES[stage].label}`, pieceId: piece.id, stage, review: false });
   }
   // Last, and short: a few phrases to play back by ear.
