@@ -119,6 +119,16 @@ const startExercise = async (page: Page) => {
   await page.goto('http://localhost:5199/#/lecon/en-rythme');
   await startExercise(page);
   await page.evaluate(() => (window as unknown as { __playInTime: () => void }).__playInTime());
+  // The score is moved by a compositor animation, not redrawn each frame.
+  await page.waitForTimeout(5500);
+  const scroll = (await page.evaluate(`(async () => {
+    const strip = document.querySelector('.strip');
+    const a = new DOMMatrix(getComputedStyle(strip).transform).m41;
+    await new Promise((r) => setTimeout(r, 500));
+    const b = new DOMMatrix(getComputedStyle(strip).transform).m41;
+    return { anims: strip.getAnimations().length, moved: a - b, tiles: document.querySelectorAll('.strip-tile').length };
+  })()`)) as { anims: number; moved: number; tiles: number };
+  ok(scroll.anims === 1 && scroll.moved > 20 && scroll.tiles >= 2, `rhythm: score scrolls by animation (${JSON.stringify(scroll)})`);
   await page.waitForSelector('.results', { timeout: 60000 });
   const rr = await page.textContent('.results');
   ok(!!rr && rr.includes('Séance validée'), `rhythm lesson validated when played in time (${rr?.slice(0, 80)})`);

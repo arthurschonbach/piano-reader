@@ -226,9 +226,10 @@ export class ScoreRenderer {
   private h = 0;
   lastView: ViewGeom = { anchorX: 0, lead: 0, pxQ: 110 };
 
-  constructor(private canvas: HTMLCanvasElement) {
+  constructor(private canvas: HTMLCanvasElement, opaque = true) {
     // Opaque canvas: we paint the paper ourselves, so the browser can skip alpha blending.
-    const c = canvas.getContext('2d', { alpha: false });
+    // Overlays (pinned clefs over a moving score) need transparency.
+    const c = canvas.getContext('2d', { alpha: !opaque });
     if (!c) throw new Error('Canvas 2D unavailable');
     this.ctx = c;
     this.vctx = new CanvasContext(c);
@@ -308,8 +309,9 @@ export class ScoreRenderer {
   }
 
   /** Only the parts that move with the view: pinned clefs and the cursor. */
-  drawOverlay(score: Score, s: DrawState): void {
+  drawOverlay(score: Score, s: DrawState, clear = false): void {
     if (this.w < 2 || this.h < 2) return;
+    if (clear) this.ctx.clearRect(0, 0, this.w, this.h);
     VCTX = this.vctx;
     RAW = this.ctx;
     this.overlay(score, s, this.geom(score, s));

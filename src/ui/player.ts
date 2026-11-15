@@ -1,6 +1,6 @@
 import { ClickTrack } from '../core/audio';
 import type { Mark } from '../core/engraver';
-import { ScrollView } from '../core/scroller';
+import { ScrollStrip } from '../core/scroller';
 import { noteName, spellOfMidi, type NoteItem, type Score } from '../core/model';
 import { buildSteps, summarize, WaitSession, type StepResult, type Summary } from '../exercise/wait';
 import { buildTargets, RhythmSession, summarizeRhythm, WINDOWS, type RhythmSummary } from '../exercise/rhythm';
@@ -75,7 +75,6 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
   const setMark = (n: NoteItem, m: Mark) => {
     marks.set(n, m);
     sv.invalidateNotes([n]);
-    dirty = true;
   };
   const addLabel = (n: NoteItem) => {
     labels.add(n);
@@ -94,8 +93,6 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
   const count = h('div', 'count');
   view.append(topBar(app, cfg.title, cfg.onExit, count));
   const stage = h('div', 'stage');
-  const canvas = h('canvas');
-  stage.append(canvas);
   const feedback = h('div', 'feedback');
   feedback.setAttribute('aria-live', 'polite');
   const tools = h('div', 'tools');
@@ -107,7 +104,6 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     namesBtn.classList.toggle('on', showNames);
     assistedNote.hidden = !assisted;
     sv.setOptions({ names: showNames });
-    dirty = true;
   });
   const assistedNote = h('span', 'assisted', 'séance non comptée');
   assistedNote.hidden = true;
@@ -176,7 +172,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
 
   // ---------- shared state ----------
   // Pre-drawn tiles: each frame only slides them (smooth on tablets).
-  const sv = new ScrollView(canvas, score, {
+  const sv = new ScrollStrip(stage, score, {
     lookahead: 0,
     names: false,
     zoom: 2.4,
@@ -187,9 +183,10 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     marks,
     labels
   });
-  let dirty = true;
+  const lastBeat = mode === 'rhythm' ? Math.max(...buildTargets(score).map((t) => t.beat)) : 0;
+  /** Rhythm mode: the run ends once the last note's window has passed. */
+  const endBeat = lastBeat + 4;
   let raf = 0;
-  let last = 0;
   let viewBeat = 0;
   let badTimer = 0;
   let releaseWake: (() => void) | null = null;
@@ -206,6 +203,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
   let judged = 0;
 
   viewBeat = mode === 'wait' ? steps[0]?.beat ?? 0 : -2;
+  sv.place(viewBeat, false);
 
   // Touch the DOM only when something changes: a write per frame forces style
   // and layout work that steals time from the score animation.
@@ -222,7 +220,6 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     view.dataset.expected = st ? st.midis.join(',') : '';
     if (st) for (const n of st.notes) setMark(n, 'current');
     setCount(`${wait?.results.length ?? 0} / ${steps.length}`);
-    dirty = true;
   };
 
   const start = () => {
@@ -248,6 +245,8 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
       t0 = performance.now() + countIn * msPerBeat + 120;
       rhythm = new RhythmSession(buildTargets(score), msPerBeat);
       clicks = new ClickTrack(app.metronome, t0, msPerBeat, -countIn, bpb, pickup);
+      // The score scrolls on the compositor, in step with the clock the clicks use.
+      sv.play(-countIn, t0 - countIn * msPerBeat, msPerBeat, endBeat);
       view.dataset.t0 = String(t0);
       view.dataset.msPerBeat = String(msPerBeat);
       view.dataset.latency = String(app.settings.latencyMs);
@@ -264,7 +263,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     wait = null;
     clearMarks();
     viewBeat = mode === 'wait' ? steps[0]?.beat ?? 0 : -2;
-    dirty = true;
+    sv.place(viewBeat, false);
     setFeedback('');
     show(introCard());
   };
@@ -318,8 +317,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
         badTimer = window.setTimeout(() => {
           if (wait?.current === step) {
             for (const n of step.notes) setMark(n, 'current');
-            dirty = true;
-          }
+                  }
         }, 600);
         const sameName = step.midis.some((m) => m % 12 === fb.played % 12);
         let msg = sameName ? `${nameOf(fb.played)} : bonne note, mauvaise octave.` : `✗ Tu as joué ${nameOf(fb.played)}.`;
@@ -328,8 +326,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
           msg += ` C’est ${step.midis.map(nameOf).join(' + ')} : regarde où ${step.midis.length > 1 ? 'ils se placent' : 'il se place'} sur la portée.`;
         }
         setFeedback(msg, 'bad');
-        dirty = true;
-      } else if (fb.kind === 'partial') {
+          } else if (fb.kind === 'partial') {
         setFeedback('…et l’autre note en même temps.');
       } else if (fb.kind === 'correct') {
         window.clearTimeout(badTimer);
@@ -349,8 +346,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
         setMark(hit.target.note, hit.grade === 'perfect' ? 'ok' : 'late');
         const a = Math.round(hit.dtMs);
         setFeedback(hit.grade === 'perfect' ? '✓' : a < 0 ? 'un peu en avance' : 'un peu en retard', hit.grade === 'perfect' ? 'good' : '');
-        dirty = true;
-      } else if (hit.kind === 'wrong') {
+          } else if (hit.kind === 'wrong') {
         setFeedback(`✗ ${nameOf(hit.played)} au lieu de ${hit.near ? nameOf(hit.near.midi) : '?'}`, 'bad');
       }
     }
@@ -374,7 +370,6 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
   const offMidi = app.midi.onChange(syncInput);
   const offTheme = app.onTheme(() => {
     sv.invalidateAll();
-    dirty = true;
   });
 
   const onVisible = () => {
@@ -389,23 +384,19 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
   const resize = () => {
     const r = stage.getBoundingClientRect();
     if (r.width > 0 && r.height > 0) sv.resize(r.width, r.height);
-    dirty = true;
   };
   const ro = new ResizeObserver(resize);
   ro.observe(stage);
 
-  const lastBeat = mode === 'rhythm' ? Math.max(...buildTargets(score).map((t) => t.beat + 0)) : 0;
 
-  const frame = (ts: number) => {
+  const frame = () => {
     raf = requestAnimationFrame(frame);
-    const dt = last ? Math.min(0.1, (ts - last) / 1000) : 0;
-    last = ts;
     if (mode === 'wait') {
       const target = wait?.current?.beat ?? (wait ? viewBeat : steps[0]?.beat ?? 0);
-      if (Math.abs(target - viewBeat) > 1e-3) {
-        viewBeat += (target - viewBeat) * Math.min(1, dt * 9);
-        if (Math.abs(target - viewBeat) < 1e-3) viewBeat = target;
-        dirty = true;
+      if (Math.abs(target - viewBeat) > 1e-6) {
+        viewBeat = target;
+        // Native glide to the next note, run by the compositor.
+        sv.place(viewBeat, true);
       }
     } else if (rhythm && !finished && view.dataset.phase === 'play') {
       const now = performance.now();
@@ -419,11 +410,9 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
       }
       setCount(`${judged} / ${rhythm.targets.length}`);
       if (viewBeat > lastBeat + WINDOWS.max / msPerBeat + 1.5) finish(false);
-      dirty = true;
     }
-    if (!dirty) return;
-    dirty = false;
-    sv.draw(viewBeat);
+    // Only tile upkeep here; the movement itself is done by the compositor.
+    sv.update(viewBeat);
   };
   raf = requestAnimationFrame(frame);
   resize();
@@ -438,6 +427,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     unmountKbd?.();
     releaseWake?.();
     document.removeEventListener('visibilitychange', onVisible);
+    sv.destroy();
     view.remove();
   };
 }
