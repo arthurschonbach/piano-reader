@@ -1,5 +1,4 @@
 /** Guided session, level test, piece page, progress, settings. */
-import { Metronome } from '../core/audio';
 import type { ThemeChoice } from '../core/settings';
 import { blockPasses, dailyPlan, placementLessons, type Activity } from '../curriculum/coach';
 import { concatScores, generateExercise } from '../curriculum/generate';
@@ -357,7 +356,22 @@ export function renderSettings(root: HTMLElement, app: App): () => void {
       stopCal = null;
     });
   });
-  page.append(latText, h('p', 'hint', 'Tu entends 4 clics d’amorce, puis joue n’importe quelle touche du piano en même temps que chacun des 8 clics suivants.'), calBtn, calBox);
+  const soundMsg = h('p', 'note');
+  const testBtn = button('Tester le son', 'btn', () => {
+    const ok = app.metronome.unlock();
+    const now = performance.now() + 150;
+    for (let i = 0; i < 4; i++) app.metronome.click(now + i * 500, i === 0);
+    soundMsg.textContent = 'Tu dois entendre 4 clics…';
+    window.setTimeout(() => {
+      const st = app.metronome.state;
+      soundMsg.textContent = !ok || st !== 'running'
+        ? `Le navigateur bloque le son (état : ${st}). Réessaie en touchant le bouton une seconde fois.`
+        : 'Rien entendu ? Monte le volume de l’appareil et coupe le mode silencieux (Centre de contrôle, icône cloche). Si tu as des écouteurs Bluetooth connectés, le son part dedans.';
+    }, 2300);
+  });
+  const btns = h('div', 'row-btns');
+  btns.append(testBtn, calBtn);
+  page.append(latText, h('p', 'hint', 'Vérifie d’abord le son. Pour calibrer : 4 clics d’amorce, puis joue n’importe quelle touche du piano en même temps que chacun des 8 clics suivants.'), btns, soundMsg, calBox);
 
   // Transfer.
   page.append(h('h2', 'sect', 'Transférer ma progression'));
@@ -412,7 +426,8 @@ export function renderSettings(root: HTMLElement, app: App): () => void {
 
 /** Clicks at 80 bpm; the median gap between click and key is the latency. */
 function calibrate(app: App, box: HTMLElement, done: (ms: number | null) => void): () => void {
-  const metro = new Metronome();
+  // One shared audio context: iOS limits how many a page may open.
+  const metro = app.metronome;
   if (!metro.unlock()) {
     box.textContent = 'Le son n’est pas disponible sur cet appareil.';
     done(null);
@@ -436,9 +451,8 @@ function calibrate(app: App, box: HTMLElement, done: (ms: number | null) => void
   });
   const timer = window.setTimeout(() => {
     off();
-    metro.dispose();
     if (gaps.length < 5) {
-      box.textContent = 'Pas assez de notes captées. Réessaie.';
+      box.textContent = 'Pas assez de notes captées. Si tu n’entends pas les clics, utilise « Tester le son ».';
       done(null);
       return;
     }
@@ -450,6 +464,5 @@ function calibrate(app: App, box: HTMLElement, done: (ms: number | null) => void
   return () => {
     window.clearTimeout(timer);
     off();
-    metro.dispose();
   };
 }
