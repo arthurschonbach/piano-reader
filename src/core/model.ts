@@ -27,6 +27,8 @@ export interface NoteItem {
 
 export interface Measure {
   number: number;
+  /** Printed bar number when it differs from `number` (sheet view lines). */
+  label?: number;
   startBeat: number;
   length: number;
   key: number;

@@ -3,7 +3,9 @@ import { lessonById } from './curriculum/lessons';
 import { playLesson } from './ui/activities';
 import { createApp } from './ui/app';
 import { renderHome } from './ui/home';
-import { renderPiece, renderPieceStage, renderPlacement, renderProgress, renderSession, renderSettings } from './ui/screens';
+import { renderLibrary, renderPiece } from './ui/library';
+import { renderGlossary } from './ui/glossary';
+import { renderPieceStage, renderPlacement, renderProgress, renderSession, renderSettings } from './ui/screens';
 
 const root = document.getElementById('app') as HTMLElement;
 const app = createApp();
@@ -23,6 +25,10 @@ function route(): void {
     cleanup = renderPieceStage(root, app, m[1], Number(m[2]));
   } else if ((m = /^#\/morceau\/([\w-]+)$/.exec(hash))) {
     cleanup = renderPiece(root, app, m[1]);
+  } else if (hash === '#/bibliotheque') {
+    cleanup = renderLibrary(root, app);
+  } else if (hash === '#/lexique') {
+    cleanup = renderGlossary(root, app);
   } else if (hash === '#/seance') {
     cleanup = renderSession(root, app);
   } else if (hash === '#/test') {

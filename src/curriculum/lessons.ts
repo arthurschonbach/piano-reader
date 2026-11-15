@@ -70,10 +70,10 @@ export const LESSONS: Lesson[] = [
     goal: 'Lire C, D, E, F, G en clé de sol, sans compter les lignes.',
     setup: 'Pouce droit sur le C du milieu du clavier (C4), un doigt par touche jusqu’au G (doigts 1 à 5).',
     theory: [
-      'La clé de sol s’enroule autour de la 2e ligne en partant du bas : la note posée sur cette ligne est un G (la clé de sol est aussi appelée clé de G).',
-      'Le C du milieu du clavier (C central, ou C4) se place juste sous la portée, sur une petite ligne ajoutée.',
-      'Lis par mouvement : si la note suivante est juste au-dessus (d’une ligne à l’interligne voisin), c’est la note suivante de la gamme. Inutile de recompter depuis le bas.',
-      'Ronde = 4 temps, blanche = 2 temps, noire = 1 temps. Ici le rythme ne compte pas encore : la partition t’attend.'
+      'La clé de sol (treble clef) s’enroule autour de la 2e ligne (line) en partant du bas : la note posée sur cette ligne est un G (la clé de sol est aussi appelée clé de G).',
+      'Le C du milieu du clavier (C central, ou C4) se place juste sous la portée (staff), sur une petite ligne ajoutée (ledger line).',
+      'Lis par mouvement : si la note suivante est juste au-dessus (d’une ligne à l’interligne voisin, the next space), c’est la note suivante de la gamme (scale). Inutile de recompter depuis le bas.',
+      'Ronde (whole note) = 4 temps (beats), blanche (half note) = 2 temps, noire (quarter note) = 1 temps. Ici le rythme ne compte pas encore : la partition t’attend.'
     ],
     mode: 'wait',
     arrangement: 'rh',
@@ -90,8 +90,8 @@ export const LESSONS: Lesson[] = [
     goal: 'Lire C, D, E, F, G en clé de fa.',
     setup: 'Auriculaire gauche (doigt 5) sur le C3, une octave sous le C central, un doigt par touche jusqu’au G, joué par le pouce.',
     theory: [
-      'La clé de fa a deux points qui entourent la 4e ligne : la note sur cette ligne est un F, celui juste sous le C central (la clé de fa est aussi appelée clé de F).',
-      'En clé de fa, les notes ne sont pas au même endroit qu’en clé de sol. Le C3 se trouve dans le 2e interligne en partant du bas.',
+      'La clé de fa (bass clef) a deux points qui entourent la 4e ligne : la note sur cette ligne est un F, celui juste sous le C central (la clé de fa est aussi appelée clé de F).',
+      'En clé de fa, les notes ne sont pas au même endroit qu’en clé de sol. Le C3 se trouve dans le 2e interligne (space) en partant du bas.',
       'Repères pour cette position : C dans le 2e interligne, D sur la ligne du milieu, F sur la 4e ligne, entre les deux points de la clé.'
     ],
     mode: 'wait',
@@ -109,7 +109,7 @@ export const LESSONS: Lesson[] = [
     goal: 'Passer d’une portée à l’autre sans perdre le fil.',
     setup: 'Main droite en position de C (pouce sur le C central), main gauche en position de C3 (auriculaire une octave plus bas).',
     theory: [
-      'La grande portée réunit les deux clés : clé de sol en haut pour la main droite, clé de fa en bas pour la main gauche.',
+      'La grande portée (grand staff) réunit les deux clés : clé de sol en haut pour la main droite, clé de fa en bas pour la main gauche.',
       'Avant chaque note, regarde d’abord sur quelle portée elle se trouve : c’est elle qui te dit quelle main joue.',
       'Le C central est à la frontière : sous la clé de sol avec une ligne ajoutée, ou au-dessus de la clé de fa.'
     ],
@@ -129,9 +129,9 @@ export const LESSONS: Lesson[] = [
     goal: 'Jouer au tempo : noires, blanches, rondes et soupirs.',
     setup: 'Pouce droit sur le C central, comme en leçon 1.',
     theory: [
-      'Maintenant la partition avance toute seule, au tempo. Le métronome compte une mesure (4 clics) avant de démarrer.',
+      'Maintenant la partition avance toute seule, au tempo. Le métronome compte une mesure (bar) de 4 clics avant de démarrer : c’est le décompte (count-in).',
       'Compte « 1, 2, 3, 4 » dans ta tête à chaque mesure : une noire dure 1 clic, une blanche 2, une ronde 4.',
-      'Le soupir est un silence d’une noire : tu ne joues rien, mais tu continues à compter.',
+      'Le soupir (quarter rest) est un silence d’une noire : tu ne joues rien, mais tu continues à compter.',
       'Mieux vaut une note juste et calme qu’une note précipitée. Baisse le tempo si besoin : la vitesse viendra.'
     ],
     mode: 'rhythm',
@@ -157,7 +157,7 @@ export const LESSONS: Lesson[] = [
     goal: 'Reconnaître secondes, tierces, quartes et quintes à leur forme.',
     setup: 'Les deux mains en position de C, comme en leçon 3.',
     theory: [
-      'Un intervalle, c’est l’écart entre deux notes. Seconde : notes voisines. Tierce : on saute une note. Quarte : on en saute deux. Quinte : du pouce à l’auriculaire.',
+      'Un intervalle (interval), c’est l’écart entre deux notes. Seconde (2nd) : notes voisines. Tierce (3rd) : on saute une note. Quarte (4th) : on en saute deux. Quinte (5th) : du pouce à l’auriculaire.',
       'Sur la portée : une seconde va d’une ligne à l’interligne juste à côté. Une tierce va d’une ligne à la ligne suivante (ou d’un interligne au suivant).',
       'Une quinte va d’une ligne à la deuxième ligne au-dessus. Lis la forme plutôt que le nom : si tu sais d’où tu pars, il suffit de mesurer l’écart.'
     ],
@@ -178,7 +178,7 @@ export const LESSONS: Lesson[] = [
     goal: 'Sortir des cinq doigts : lire de C3 à C5 sur les deux portées.',
     setup: 'Ta main se déplace : regarde la note, trouve-la au clavier. Les doigtés sont libres.',
     theory: [
-      'Cinq notes repères à reconnaître d’un coup d’œil : le C central (ligne ajoutée entre les deux portées) et le G4 (2e ligne de la clé de sol).',
+      'Cinq notes repères (landmark notes) à reconnaître d’un coup d’œil : le C central (ligne ajoutée entre les deux portées) et le G4 (2e ligne de la clé de sol).',
       'Puis le C5 (3e interligne de la clé de sol), le F3 (4e ligne de la clé de fa) et le C3 (2e interligne de la clé de fa).',
       'Pour lire une autre note, pars du repère le plus proche et compte une ou deux notes.'
     ],
@@ -199,7 +199,7 @@ export const LESSONS: Lesson[] = [
     goal: 'Jouer une mélodie à droite sur de longues notes à gauche.',
     setup: 'Les deux mains en position de C. La main gauche tient ses notes pendant que la droite avance.',
     theory: [
-      'Les notes alignées verticalement se jouent en même temps, même si elles sont sur deux portées différentes.',
+      'Les notes alignées verticalement se jouent en même temps (hands together), même si elles sont sur deux portées différentes.',
       'La main gauche joue peu de notes, mais longues : garde le doigt enfoncé pendant que la droite continue.',
       'Lis de bas en haut : d’abord la note de la main gauche, puis celle de la droite, et pose-les ensemble.'
     ],
@@ -229,8 +229,8 @@ export const LESSONS: Lesson[] = [
     goal: 'Jouer deux notes par temps, régulièrement.',
     setup: 'Pouce droit sur le C central.',
     theory: [
-      'La croche dure un demi-temps : deux croches valent une noire. Elles sont souvent reliées par une barre.',
-      'Compte « 1 et 2 et 3 et 4 et » : les croches tombent sur le chiffre et sur le « et ».',
+      'La croche (eighth note) dure un demi-temps : deux croches valent une noire. Elles sont souvent reliées par une barre (beam).',
+      'Compte « 1 et 2 et 3 et 4 et » (« one and two and… ») : les croches tombent sur le chiffre et sur le « et ».',
       'Le métronome ne clique que sur les temps : la deuxième croche tombe pile entre deux clics.'
     ],
     mode: 'rhythm',
@@ -274,8 +274,8 @@ export const LESSONS: Lesson[] = [
     goal: 'Lire l’armure et jouer le F dièse sans qu’il soit écrit devant la note.',
     setup: 'Main droite : pouce sur le D4 juste au-dessus du C central, majeur (3) sur le F♯ (touche noire). Main gauche en position de G.',
     theory: [
-      'Le dièse (♯) monte une note d’un demi-ton : on joue la touche juste à droite. F♯ est la touche noire entre F et G.',
-      'En G majeur, l’armure (le ♯ écrit après la clé, sur la ligne du F) veut dire : tous les F sont dièses, même sans ♯ devant la note.',
+      'Le dièse (♯, sharp) monte une note d’un demi-ton (half step) : on joue la touche juste à droite. F♯ est la touche noire entre F et G.',
+      'En G majeur (G major), l’armure (key signature : le ♯ écrit après la clé, sur la ligne du F) veut dire : tous les F sont dièses, même sans ♯ devant la note.',
       'C’est le piège classique : l’armure n’est écrite qu’en début de ligne. Prends l’habitude de la regarder avant de jouer.'
     ],
     mode: 'wait',
@@ -294,8 +294,8 @@ export const LESSONS: Lesson[] = [
     goal: 'Lire une armure avec un bémol.',
     setup: 'Main droite : pouce sur le F4 au-dessus du C central, annulaire (4) sur le B♭. Main gauche : auriculaire sur le F2, pouce sur le C3.',
     theory: [
-      'Le bémol (♭) descend une note d’un demi-ton : on joue la touche juste à gauche. B♭ est la touche noire entre A et B.',
-      'En F majeur, l’armure a un ♭ sur la ligne du B : tous les B sont bémols.',
+      'Le bémol (♭, flat) descend une note d’un demi-ton : on joue la touche juste à gauche. B♭ est la touche noire entre A et B.',
+      'En F majeur (F major), l’armure a un ♭ sur la ligne du B : tous les B sont bémols.',
       'Comme pour le F♯, regarde l’armure avant de commencer et répète-toi « B bémol » dans la tête.'
     ],
     mode: 'wait',

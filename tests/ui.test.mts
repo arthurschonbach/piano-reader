@@ -147,6 +147,36 @@ const startExercise = async (page: Page) => {
   await page.waitForSelector('.intro');
   ok((await page.textContent('.intro h2')) === 'Main gauche seule', 'next stage: left hand');
 
+  // Library, piece sheet, glossary.
+  await page.goto('http://localhost:5199/#/bibliotheque');
+  await page.waitForSelector('.chips');
+  const all = await page.locator('.pieces .piece').count();
+  ok(all >= 15, `library lists ${all} pieces`);
+  await page.click('.chip >> text=/Avancé/');
+  ok((await page.locator('.pieces .piece').count()) < all, 'level filter narrows the list');
+  await page.click('.chip >> text=/Tous/');
+  await page.click('.piece:has-text("Menuet en sol") >> text=Ouvrir');
+  await page.waitForSelector('.sheet-line');
+  ok((await page.locator('.sheet-line').count()) >= 4, 'piece page shows the full score in lines');
+  await page.click('text=Choisir comme morceau en cours');
+  await page.waitForSelector('text=/ton morceau en cours/');
+  ok(true, 'piece chosen as current');
+  await page.goto('http://localhost:5199/#/');
+  await page.waitForSelector('.pieces');
+  ok((await page.textContent('.pieces .piece.current .t')) === 'Menuet en sol (Minuet in G)', 'home shows the chosen piece');
+  await page.goto('http://localhost:5199/#/lexique');
+  await page.waitForSelector('.glossary');
+  await page.fill('.search', 'quarter');
+  const found = (await page.locator('.glossary').allTextContents()).join(' ');
+  ok(!!found && found.includes('noire') && found.includes('soupir'), 'glossary search finds French terms from English');
+
+  // A 3/4 piece with a pickup plays in rhythm mode.
+  await page.goto('http://localhost:5199/#/morceau/joyeux-anniversaire/4');
+  await startExercise(page);
+  await page.evaluate(() => (window as unknown as { __playInTime: () => void }).__playInTime());
+  await page.waitForSelector('.results', { timeout: 60000 });
+  ok((await page.textContent('.results'))!.includes('100 %'), '3/4 piece with pickup: every note judged on time');
+
   // Progress and settings pages render.
   await page.goto('http://localhost:5199/#/progres');
   await page.waitForSelector('.notemap');

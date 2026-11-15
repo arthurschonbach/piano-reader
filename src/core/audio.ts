@@ -119,6 +119,7 @@ export class Metronome {
 /**
  * Keeps clicks scheduled a little ahead of time on each call to pump().
  * Beat 0 happens at t0 (performance.now ms); negative beats are the count-in.
+ * `origin` is the first downbeat (after a pickup), for the accent.
  */
 export class ClickTrack {
   private nextBeat: number;
@@ -127,7 +128,8 @@ export class ClickTrack {
     private t0: number,
     private msPerBeat: number,
     from: number,
-    private beatsPerBar = 4
+    private beatsPerBar = 4,
+    private origin = 0
   ) {
     this.nextBeat = Math.ceil(from);
   }
@@ -138,7 +140,8 @@ export class ClickTrack {
       const b = this.nextBeat++;
       if (!enabled && b >= 0) continue;
       if (countInOnly && b >= 0) continue;
-      const accent = ((b % this.beatsPerBar) + this.beatsPerBar) % this.beatsPerBar === 0;
+      const k = b - this.origin;
+      const accent = ((k % this.beatsPerBar) + this.beatsPerBar) % this.beatsPerBar === 0;
       this.metro.click(this.t0 + b * this.msPerBeat, accent);
     }
   }

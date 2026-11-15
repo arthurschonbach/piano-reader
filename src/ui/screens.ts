@@ -152,42 +152,7 @@ export function renderPlacement(root: HTMLElement, app: App): () => void {
   });
 }
 
-// ---------------------------------------------------------------- piece page
-
-export function renderPiece(root: HTMLElement, app: App, id: string): () => void {
-  const piece = pieceById(id);
-  if (!piece) {
-    app.go('#/');
-    return () => undefined;
-  }
-  const r = app.progress.pieces[piece.id];
-  const stage = r?.stage ?? 0;
-  const view = h('div', 'subpage');
-  view.append(topBar(app, piece.title, () => app.go('#/')));
-  const page = h('div', 'page');
-  page.append(h('h1', 'title', piece.title), h('p', 'sub', `${piece.origin} · tempo cible ${piece.bpm} bpm`));
-  page.append(h('p', 'setup', `🖐 ${piece.setup}`));
-  const tips = h('ul', 'tips');
-  for (const t of piece.tips) tips.append(h('li', undefined, t));
-  page.append(tips);
-  page.append(h('h2', 'sect', 'Apprendre étape par étape'));
-  const ol = h('ol', 'stages');
-  PIECE_STAGES.forEach((st, i) => {
-    const done = i < stage;
-    const li = h('li', `pstage${done ? ' done' : ''}${i === stage ? ' current' : ''}`);
-    li.append(h('span', 'num', done ? '✓' : String(i + 1)), h('span', 'lbl', st.label + (st.tempo ? ` (${Math.round(piece.bpm * st.tempo)} bpm)` : '')));
-    li.append(button(i === stage ? 'Travailler' : 'Jouer', i === stage ? 'btn primary' : 'btn', () => app.go(`#/morceau/${piece.id}/${i}`)));
-    ol.append(li);
-  });
-  page.append(ol);
-  if (stage >= PIECE_STAGES.length) {
-    page.append(h('p', 'note', `✓ Appris. ${r?.due ? `Prochaine révision le ${r.due.split('-').reverse().join('/')}` : ''} (${r?.reviews ?? 0} révision${(r?.reviews ?? 0) > 1 ? 's' : ''} réussie${(r?.reviews ?? 0) > 1 ? 's' : ''}).`));
-  }
-  page.append(h('p', 'hint', 'Une étape validée débloque la suivante. Pour un vrai apprentissage, ne fais pas tout le même jour : reprendre le lendemain fixe le morceau.'));
-  view.append(page);
-  root.append(view);
-  return () => view.remove();
-}
+// ---------------------------------------------------------------- piece stage
 
 export function renderPieceStage(root: HTMLElement, app: App, id: string, stage: number): () => void {
   const piece = pieceById(id);

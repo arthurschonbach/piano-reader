@@ -4,8 +4,8 @@ import { buildSteps, HINT_AFTER, summarize, WaitSession } from '../src/exercise/
 import { buildTargets, RhythmSession, summarizeRhythm } from '../src/exercise/rhythm';
 import { concatScores, generateExercise } from '../src/curriculum/generate';
 import { LESSONS, lessonNotes } from '../src/curriculum/lessons';
-import { PIECES, PIECE_STAGES, parseHand, pieceScore } from '../src/curriculum/pieces';
-import { blockPasses, currentLesson, dailyPlan, flashLesson, knownHands, passes, sightReadingLesson } from '../src/curriculum/coach';
+import { PIECES, PIECE_STAGES, beatsPerBar, parseHand, pieceScore, pieceTags } from '../src/curriculum/pieces';
+import { blockPasses, currentLesson, currentPiece, dailyPlan, flashLesson, knownHands, passes, sightReadingLesson } from '../src/curriculum/coach';
 import {
   addDays, dayKey, emptyProgress, exportProgress, importProgress, migrate, recordLesson, recordPiece, recordPlacement,
   recordPractice, streak, validatedDays, weakestNotes, weaknessMap, type SessionMetrics
@@ -124,13 +124,23 @@ for (const pc of PIECES) {
   const rh = parseHand(pc.rh);
   const lh = parseHand(pc.lh);
   ok(rh.length === lh.length, `${pc.title}: both hands have ${rh.length} bars`);
-  ok([...rh, ...lh].every((bar) => Math.abs(bar.reduce((a, t) => a + t.dur, 0) - 4) < 1e-9), `${pc.title}: every bar is 4 beats`);
+  const bpb = beatsPerBar(pc);
+  const want = (i: number) => (i === 0 && pc.pickup ? pc.pickup : bpb);
+  ok([rh, lh].every((hand) => hand.every((bar, i) => Math.abs(bar.reduce((a, t) => a + t.dur, 0) - want(i)) < 1e-9)), `${pc.title}: every bar is ${bpb} beats${pc.pickup ? ' after the pickup' : ''}`);
   const both = pieceScore(pc, 'both');
+  ok(both.measures.every((m, i) => i === 0 || Math.abs(m.startBeat - both.measures[i - 1].startBeat - both.measures[i - 1].length) < 1e-9), `${pc.title}: bars follow each other`);
+  ok(pc.level >= 1 && pc.level <= 5, `${pc.title}: level ${pc.level}`);
+  ok(both.measures.every((m) => m.key === pc.keyFifths), `${pc.title}: key signature on every bar`);
   ok(both.staves === 2 && pieceScore(pc, 'lh').clefs[0] === 'F', `${pc.title}: grand staff / bass clef alone`);
   ok(both.measures[0].notes.some((n) => n.finger), `${pc.title}: starting fingers given`);
   ok(buildTargets(both).length > 20, `${pc.title}: playable in rhythm mode`);
 }
 ok(PIECE_STAGES.length === 5 && PIECE_STAGES[0].hands === 'rh' && PIECE_STAGES[4].tempo === 1, 'piece stages: hands apart to full tempo');
+ok(PIECES.length >= 15 && [1, 2, 3, 4, 5].every((lv) => PIECES.some((p) => p.level === lv)), `library: ${PIECES.length} pieces covering levels 1 to 5`);
+ok(new Set(PIECES.map((p) => p.id)).size === PIECES.length, 'library: unique ids');
+const hb = PIECES.find((p) => p.id === 'joyeux-anniversaire')!;
+ok(pieceScore(hb, 'both').measures[0].length === 1 && pieceTags(hb).includes('levée') && pieceTags(hb).includes('3/4'), 'pickup bar and tags');
+ok(pieceScore(PIECES.find((p) => p.id === 'canon-pachelbel')!, 'rh').measures.flatMap((m) => m.notes).some((n) => n.midi === 78 && noteName(n.spell) === 'F♯'), 'sharps in piece notation');
 
 // --- Progress, mastery, reviews ---
 const metrics = (accuracy: number, med: number, extra: Partial<SessionMetrics> = {}): SessionMetrics => ({
@@ -192,6 +202,9 @@ ok(!!back && back.placement?.stoppedAt === 'intervalles', 'export / import round
 ok(importProgress('n’importe quoi') === null, 'bad code rejected');
 pl = recordPractice(pl, metrics(1, 1), d1);
 ok(pl.days.includes(dayKey(d1)), 'practice marks the day');
+
+ok(currentPiece(emptyProgress())?.level === 1, 'without a choice, the easiest piece comes first');
+ok(currentPiece({ ...emptyProgress(), focusPiece: 'menuet-sol' })?.id === 'menuet-sol', 'the piece chosen in the library becomes current');
 
 if (fails) {
   console.error(`\n${fails} failing check(s)`);

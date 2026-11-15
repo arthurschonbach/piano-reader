@@ -52,6 +52,34 @@ interface GlyphBox { w: number; h: number; above: number; below: number; xoff: n
 const gCache = new Map<string, GlyphBox>();
 
 let VCTX: CanvasContext;
+let RAW: CanvasRenderingContext2D;
+
+/**
+ * Glyph outlines turned into Path2D once, then filled natively each frame.
+ * Re-walking VexFlow's outlines on every frame was the main cost of a redraw.
+ */
+const pathCache = new Map<string, Path2D>();
+const HAS_PATH2D = typeof Path2D !== 'undefined';
+
+function glyphPath(code: string, point: number): Path2D {
+  const key = `${code}@${point}`;
+  let p = pathCache.get(key);
+  if (!p) {
+    const path = new Path2D();
+    const rec = {
+      beginPath: () => undefined,
+      fill: () => undefined,
+      moveTo: (x: number, y: number) => path.moveTo(x, y),
+      lineTo: (x: number, y: number) => path.lineTo(x, y),
+      quadraticCurveTo: (a: number, b: number, x: number, y: number) => path.quadraticCurveTo(a, b, x, y),
+      bezierCurveTo: (a: number, b: number, c: number, d: number, x: number, y: number) => path.bezierCurveTo(a, b, c, d, x, y)
+    };
+    Glyph.renderGlyph(rec as unknown as CanvasContext, 0, 0, point, code);
+    pathCache.set(key, path);
+    p = path;
+  }
+  return p;
+}
 
 function gbox(code: string, em: number): GlyphBox {
   const key = `${code}@${em}`;
@@ -86,7 +114,14 @@ function drawG(
   if (anchorY === 't') gy = y + b.above;
   else if (anchorY === 'bink') gy = y - b.below;
   else if (anchorY === 'cink') gy = y + (b.above - b.below) / 2;
-  Glyph.renderGlyph(VCTX, x - b.xoff, gy, point, code);
+  if (!HAS_PATH2D) {
+    Glyph.renderGlyph(VCTX, x - b.xoff, gy, point, code);
+    return;
+  }
+  const path = glyphPath(code, point);
+  RAW.translate(x - b.xoff, gy);
+  RAW.fill(path);
+  RAW.translate(-(x - b.xoff), -gy);
 }
 
 interface Cluster {
@@ -115,6 +150,8 @@ export interface DrawState {
   /** Cursor position as a fraction of the width (default 0.3). */
   anchor?: number;
   marks?: ReadonlyMap<NoteItem, Mark>;
+  /** Fit this many beats in the width, starting at beat 0 (static sheet). */
+  fitBeats?: number;
   /** Draw the vertical play-position line (default true). */
   cursor?: boolean;
   /** Draw suggested fingers (default true). */
@@ -174,15 +211,17 @@ function keyAlter(fifths: number, step: number): number {
 
 export class ScoreRenderer {
   private ctx: CanvasRenderingContext2D;
+  private vctx: CanvasContext;
   private w = 0;
   private h = 0;
   lastView: ViewGeom = { anchorX: 0, lead: 0, pxQ: 110 };
 
   constructor(private canvas: HTMLCanvasElement) {
-    const c = canvas.getContext('2d');
+    // Opaque canvas: we paint the paper ourselves, so the browser can skip alpha blending.
+    const c = canvas.getContext('2d', { alpha: false });
     if (!c) throw new Error('Canvas 2D unavailable');
     this.ctx = c;
-    VCTX = new CanvasContext(c);
+    this.vctx = new CanvasContext(c);
   }
 
   beatAt(xCss: number, currentBeat: number): number {
@@ -191,7 +230,9 @@ export class ScoreRenderer {
   }
 
   resize(w: number, h: number): void {
-    const dpr = Math.min(2.5, (typeof window !== 'undefined' && window.devicePixelRatio) || 1);
+    // Resizing a canvas reallocates it: skip when nothing changed.
+    if (Math.abs(w - this.w) < 0.5 && Math.abs(h - this.h) < 0.5) return;
+    const dpr = Math.min(2, (typeof window !== 'undefined' && window.devicePixelRatio) || 1);
     this.canvas.width = Math.max(1, Math.round(w * dpr));
     this.canvas.height = Math.max(1, Math.round(h * dpr));
     this.w = w;
@@ -208,6 +249,9 @@ export class ScoreRenderer {
 
   draw(score: Score, s: DrawState): void {
     const { ctx, w, h } = this;
+    // Several renderers can live on one page (sheet view): point the glyph helpers at ours.
+    VCTX = this.vctx;
+    RAW = ctx;
     if (w < 2 || h < 2) return;
     ctx.clearRect(0, 0, w, h);
     ctx.fillStyle = P.paper;
@@ -221,7 +265,6 @@ export class ScoreRenderer {
     if (SP > maxSP) SP = Math.max(4, maxSP);
     // Narrow screens (phone in portrait): keep a few notes of look-ahead visible.
     SP = Math.max(4, Math.min(SP, w / 26));
-    const pxQ = (s.pxPerBeat ?? 11) * SP;
     const staffH = 4 * SP;
     const gap = 6.5 * SP;
     const contentTotal = single ? staffH + 2 * SP : staffH * 2 + gap + 18;
@@ -242,7 +285,9 @@ export class ScoreRenderer {
       return mw.clefW + mw.keyW + mw.timeW + 3 * SP;
     })() : 2 * SP;
 
-    const anchorX = w * (s.anchor ?? 0.3);
+    // Sheet view: fit the whole (short) score in the width instead of scrolling.
+    const pxQ = s.fitBeats ? Math.max(2 * SP, (w - lead - 1.5 * SP) / s.fitBeats) : (s.pxPerBeat ?? 11) * SP;
+    const anchorX = s.fitBeats ? 0 : w * (s.anchor ?? 0.3);
     this.lastView = { anchorX, lead, pxQ };
     const xOf = (b: number) => anchorX + lead + (b - s.beat) * pxQ;
 
@@ -293,7 +338,7 @@ export class ScoreRenderer {
       ctx.fillStyle = P.bar;
       ctx.font = `${10 * U}px system-ui, sans-serif`;
       ctx.textAlign = 'left';
-      ctx.fillText(String(m.number), bx + 4 * U, trebleTop - 6 * U);
+      ctx.fillText(String(m.label ?? m.number), bx + 4 * U, trebleTop - 6 * U);
       this.drawMeasureHeader(score, m, m.number === 1 ? lineX : bx, SP, staffTop, bottomIdx, yIdxFor, single);
     }
     if (!score.infinite && score.measures.length) {

@@ -153,11 +153,12 @@ button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent);
 
 /* ---------- Exercise ---------- */
 .ex { height: 100%; display: flex; flex-direction: column; position: relative; }
-.stage { flex: 1; min-height: 140px; position: relative; }
+.stage { flex: 1; min-height: 140px; position: relative; contain: strict; }
 .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 .feedback {
-  text-align: center; min-height: 2.6em; padding: 6px 16px; font-size: 1.15rem; font-weight: 600;
-  display: flex; align-items: center; justify-content: center;
+  /* Fixed height: a longer message must never resize the score above it. */
+  text-align: center; height: 3.2em; padding: 4px 16px; font-size: 1.1rem; font-weight: 600; line-height: 1.3;
+  display: flex; align-items: center; justify-content: center; overflow: hidden; flex: none;
 }
 .feedback[data-tone="good"] { color: var(--good); }
 .feedback[data-tone="bad"] { color: var(--bad); }
@@ -184,7 +185,7 @@ button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent);
 .key.down.white { background: #f3d9c9; }
 .key.down.black { background: #6d5a46; }
 @media (max-height: 480px) {
-  .feedback { min-height: 2em; padding: 2px 12px; font-size: 1rem; }
+  .feedback { height: 2.6em; padding: 2px 12px; font-size: 0.95rem; }
   .tools { padding-top: 2px; padding-bottom: 4px; }
 }
 
@@ -233,3 +234,30 @@ button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent);
 .code { width: 100%; border: 1px solid var(--line); border-radius: 10px; background: var(--card); padding: 10px; font-family: ui-monospace, monospace; font-size: 0.8rem; }
 .row-btns { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 .cal-box { margin-top: 10px; font-weight: 600; min-height: 1.4em; }
+
+/* ---------- Library ---------- */
+.page.wide { max-width: 980px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 16px 0; }
+.chip {
+  border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 6px 12px;
+  min-height: 36px; cursor: pointer; font-size: 0.88rem;
+}
+.chip.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; align-items: center; }
+.level { font-size: 0.78rem; font-weight: 650; letter-spacing: 0.02em; color: var(--accent-deep); white-space: nowrap; }
+.tag { font-size: 0.74rem; padding: 2px 8px; border-radius: 999px; background: var(--soft); border: 1px solid var(--line); color: var(--muted); }
+.wide-btn { width: 100%; margin-top: 10px; }
+.sheet { display: grid; gap: 4px; margin-top: 8px; }
+.sheet-line { width: 100%; display: block; border-radius: 8px; }
+.lex-link { width: 100%; margin-top: 6px; color: var(--muted); }
+
+/* ---------- Glossary ---------- */
+.search {
+  width: 100%; margin-top: 16px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--card); color: var(--ink); font: inherit;
+}
+.glossary { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px 0; }
+.glossary dt { font-weight: 650; margin-top: 10px; }
+.glossary dt .en { color: var(--accent-deep); font-style: italic; }
+.glossary dt .arrow { color: var(--muted); }
+.glossary dd { margin: 2px 0 0; color: var(--muted); line-height: 1.45; font-size: 0.93rem; }

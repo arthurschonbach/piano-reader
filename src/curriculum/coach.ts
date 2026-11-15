@@ -96,15 +96,15 @@ export function sightReadingLesson(p: Progress): Lesson {
   };
 }
 
-/** Piece being learnt (first started and not learnt, else the easiest new one). */
+/** Piece being learnt: the one chosen in the library, else one started, else the easiest new one. */
 export function currentPiece(p: Progress): Piece | null {
   const n = PIECE_STAGES.length;
-  const started = PIECES.find((pc) => {
-    const r = p.pieces[pc.id];
-    return r && r.stage > 0 && r.stage < n;
-  });
+  const learning = (pc: Piece) => (p.pieces[pc.id]?.stage ?? 0) < n;
+  const focus = PIECES.find((pc) => pc.id === p.focusPiece);
+  if (focus && learning(focus)) return focus;
+  const started = PIECES.find((pc) => learning(pc) && (p.pieces[pc.id]?.stage ?? 0) > 0);
   if (started) return started;
-  return PIECES.find((pc) => (p.pieces[pc.id]?.stage ?? 0) < n) ?? null;
+  return [...PIECES].sort((a, b) => a.level - b.level).find(learning) ?? null;
 }
 
 export function duePieces(p: Progress, now = Date.now()): Piece[] {

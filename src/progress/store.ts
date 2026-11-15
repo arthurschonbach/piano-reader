@@ -53,6 +53,8 @@ export interface Progress {
   placement?: { date: number; passed: string[]; stoppedAt: string | null };
   /** Welcome screen answered. */
   onboarded: boolean;
+  /** Piece chosen in the library as the one being learnt. */
+  focusPiece?: string;
 }
 
 export const emptyProgress = (): Progress => ({

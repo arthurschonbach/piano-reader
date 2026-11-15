@@ -1,6 +1,7 @@
 import { currentLesson, currentPiece, dailyPlan, duePieces, lessonDone } from '../curriculum/coach';
 import { LESSONS, MASTERY } from '../curriculum/lessons';
-import { PIECES, PIECE_STAGES } from '../curriculum/pieces';
+import { PIECES } from '../curriculum/pieces';
+import { pieceRow } from './library';
 import type { MidiStatus } from '../input/midi';
 import { practisedToday, streak, validatedDays, weakestNotes } from '../progress/store';
 import type { App } from './app';
@@ -112,23 +113,15 @@ export function renderHome(root: HTMLElement, app: App): () => void {
 
   // --- Pieces ---
   page.append(h('h2', 'sect', 'Morceaux'));
-  const due = new Set(duePieces(p).map((x) => x.id));
-  const curPiece = currentPiece(p);
   const pl = h('ul', 'pieces');
-  for (const pc of PIECES) {
-    const r = p.pieces[pc.id];
-    const stage = r?.stage ?? 0;
-    const li = h('li', `piece${stage >= PIECE_STAGES.length ? ' learnt' : ''}${pc === curPiece ? ' current' : ''}`);
-    const meta = h('div', 'meta');
-    let st: string;
-    if (stage >= PIECE_STAGES.length) st = due.has(pc.id) ? '↻ Révision aujourd’hui' : `✓ Appris · révision le ${r?.due?.split('-').reverse().slice(0, 2).join('/')}`;
-    else if (stage > 0) st = `Étape ${stage + 1} / ${PIECE_STAGES.length} · ${PIECE_STAGES[stage].label}`;
-    else st = `Niveau ${'●'.repeat(pc.level)}${'○'.repeat(3 - pc.level)}`;
-    meta.append(h('div', 't', pc.title), h('div', 'd', pc.origin), h('div', 'st', st));
-    li.append(meta, button('Ouvrir', 'btn', () => app.go(`#/morceau/${pc.id}`)));
-    pl.append(li);
+  const curPiece = currentPiece(p);
+  const shown = new Set<string>();
+  for (const pc of [...(curPiece ? [curPiece] : []), ...duePieces(p)]) {
+    if (shown.has(pc.id)) continue;
+    shown.add(pc.id);
+    pl.append(pieceRow(app, pc));
   }
-  page.append(pl);
+  page.append(pl, button(`📚 Bibliothèque · ${PIECES.length} morceaux`, 'btn wide-btn', () => app.go('#/bibliotheque')));
 
   // --- Footer links ---
   const weak = weakestNotes(p);
@@ -139,6 +132,7 @@ export function renderHome(root: HTMLElement, app: App): () => void {
   const links = h('div', 'links');
   links.append(
     button('Mes progrès', 'btn', () => app.go('#/progres')),
+    button('📖 Lexique FR ↔ EN', 'btn', () => app.go('#/lexique')),
     button(p.placement ? 'Refaire le test de niveau' : 'Test de niveau', 'btn', () => app.go('#/test'))
   );
   page.append(links);

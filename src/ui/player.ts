@@ -151,6 +151,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     } else {
       card.append(button('C’est parti', 'btn primary big', () => start()), h('p', 'hint', 'ou joue n’importe quelle note pour commencer'));
     }
+    card.append(button('📖 Un mot inconnu ? Lexique FR ↔ EN', 'btn quiet small lex-link', () => app.go('#/lexique')));
     return card;
   };
   show(introCard());
@@ -174,19 +175,25 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
   let clicks: ClickTrack | null = null;
   let t0 = 0;
   let msPerBeat = 1000;
+  let judged = 0;
 
   viewBeat = mode === 'wait' ? steps[0]?.beat ?? 0 : -2;
 
+  // Touch the DOM only when something changes: a write per frame forces style
+  // and layout work that steals time from the score animation.
   const setFeedback = (text: string, tone: '' | 'good' | 'bad' = '') => {
-    feedback.textContent = text;
-    feedback.dataset.tone = tone;
+    if (feedback.textContent !== text) feedback.textContent = text;
+    if (feedback.dataset.tone !== tone) feedback.dataset.tone = tone;
+  };
+  const setCount = (text: string) => {
+    if (count.textContent !== text) count.textContent = text;
   };
 
   const markCurrent = () => {
     const st = wait?.current;
     view.dataset.expected = st ? st.midis.join(',') : '';
     if (st) for (const n of st.notes) marks.set(n, 'current');
-    count.textContent = `${wait?.results.length ?? 0} / ${steps.length}`;
+    setCount(`${wait?.results.length ?? 0} / ${steps.length}`);
     dirty = true;
   };
 
@@ -207,14 +214,19 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     } else {
       app.metronome.unlock();
       msPerBeat = 60000 / bpm;
-      t0 = performance.now() + 4 * msPerBeat + 120;
+      // One bar of count-in; with a pickup, keep counting up to its first note.
+      const bpb = score.measures.find((m) => m.time)?.time?.[0] ?? 4;
+      const pickup = score.measures.length > 1 && score.measures[0].length < bpb ? score.measures[0].length : 0;
+      const countIn = bpb + (pickup ? bpb - pickup : 0);
+      t0 = performance.now() + countIn * msPerBeat + 120;
       rhythm = new RhythmSession(buildTargets(score), msPerBeat);
-      clicks = new ClickTrack(app.metronome, t0, msPerBeat, -4);
+      clicks = new ClickTrack(app.metronome, t0, msPerBeat, -countIn, bpb, pickup);
       view.dataset.t0 = String(t0);
       view.dataset.msPerBeat = String(msPerBeat);
       view.dataset.latency = String(app.settings.latencyMs);
       view.dataset.onsets = JSON.stringify(rhythm.targets.map((t) => [t.beat, t.midi]));
-      count.textContent = `${bpm} bpm`;
+      setCount(`${bpm} bpm`);
+      judged = 0;
     }
   };
 
@@ -306,6 +318,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
       if (beat < -0.6) return; // count-in
       const hit = rhythm.noteOn(e.midi, beat);
       if (hit.kind === 'hit') {
+        judged++;
         marks.set(hit.target.note, hit.grade === 'perfect' ? 'ok' : 'late');
         const a = Math.round(hit.dtMs);
         setFeedback(hit.grade === 'perfect' ? '✓' : a < 0 ? 'un peu en avance' : 'un peu en retard', hit.grade === 'perfect' ? 'good' : '');
@@ -370,11 +383,11 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
       viewBeat = (now - t0) / msPerBeat;
       if (viewBeat < 0) setFeedback(`${Math.ceil(-viewBeat)}…`);
       for (const t of rhythm.tick(viewBeat - app.settings.latencyMs / msPerBeat)) {
+        judged++;
         marks.set(t.note, 'bad');
         setFeedback('raté', 'bad');
       }
-      const done = rhythm.targets.filter((t) => t.grade).length;
-      count.textContent = `${done} / ${rhythm.targets.length}`;
+      setCount(`${judged} / ${rhythm.targets.length}`);
       if (viewBeat > lastBeat + WINDOWS.max / msPerBeat + 1.5) finish(false);
       dirty = true;
     }
