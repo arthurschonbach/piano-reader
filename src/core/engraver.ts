@@ -542,7 +542,9 @@ export class ScoreRenderer {
       const idxPos = fifths >= 0 ? (bass ? BASS_POS : TREBLE_POS) : (bass ? BASS_POS_FLAT : TREBLE_POS_FLAT);
       for (let i = 0; i < Math.abs(fifths); i++) {
         const code = fifths > 0 ? 'accidentalSharp' : 'accidentalFlat';
-        drawG(code, 4 * SP, x + i * 1.08 * SP, yIdx(idxPos[i]), 'cink');
+        // SMuFL accidentals are drawn from their origin, which sits on the
+        // line/space they apply to. Centring the box put flats half a space low.
+        drawG(code, 4 * SP, x + i * 1.08 * SP, yIdx(idxPos[i]), 'b');
       }
     };
     const drawTime = (x: number, t: [number, number]) => {
@@ -703,7 +705,7 @@ function drawStream(ctx: CanvasRenderingContext2D, list: Cluster[], e: StreamEnv
       }
       if (accDraw !== null) {
         const g = accGlyph(accDraw);
-        drawG(g, 4 * SP, gx - 0.3 * SP - gbox(g, 4 * SP).w, y, 'cink');
+        drawG(g, 4 * SP, gx - 0.3 * SP - gbox(g, 4 * SP).w, y, 'b');
       }
       if (e.fingers && n.finger && !c.grace) {
         // Opposite the stem, close to the note head; whole notes: right hand above, left hand below.
