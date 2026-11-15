@@ -35,6 +35,8 @@ export interface PlayConfig {
   fingers?: boolean;
   /** Staff carrying the melody, for the melody/accompaniment balance. */
   melodyStaff?: number;
+  /** Look-ahead: beats hidden in front of the cursor. Less than this during play = not counted. */
+  mask?: number;
   onFinish: (o: Outcome, show: (card: HTMLElement) => void, restart: () => void) => void;
   onExit: () => void;
 }
@@ -115,7 +117,21 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
   });
   const assistedNote = h('span', 'assisted', 'séance non comptée');
   assistedNote.hidden = true;
-  tools.append(namesBtn, assistedNote);
+  // Look-ahead curtain: none, one beat, two beats.
+  let maskBeats = cfg.mask ?? 0;
+  const maskLabel = () => (maskBeats ? `Cache : ${maskBeats} temps` : 'Cache');
+  const maskBtn = button(maskLabel(), `btn toggle${maskBeats ? ' on' : ''}`, () => {
+    maskBeats = (maskBeats + 1) % 3;
+    maskBtn.textContent = maskLabel();
+    maskBtn.classList.toggle('on', maskBeats > 0);
+    if (view.dataset.phase === 'play' && maskBeats < (cfg.mask ?? 0)) {
+      assisted = true;
+      assistedNote.hidden = false;
+    }
+    applyMask();
+  });
+  maskBtn.title = 'Cache les notes juste avant qu’elles soient jouées : il faut les lire en avance.';
+  tools.append(namesBtn, maskBtn, assistedNote);
   let metroBtn: HTMLButtonElement | null = null;
   if (mode === 'rhythm') {
     metroBtn = button('Métronome', `btn toggle${app.settings.metronome ? ' on' : ''}`, () => {
@@ -224,6 +240,9 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
 
   viewBeat = mode === 'wait' ? steps[0]?.beat ?? 0 : -2;
   sv.place(viewBeat, false);
+  /** Wait mode shows the first note: there is nothing before it to read ahead from. */
+  const applyMask = () => sv.setMask(mode === 'wait' && !(wait && wait.results.length > 0) ? 0 : maskBeats);
+  applyMask();
 
   // Touch the DOM only when something changes: a write per frame forces style
   // and layout work that steals time from the score animation.
@@ -253,6 +272,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     releaseWake ??= keepAwake();
     if (mode === 'wait') {
       wait = new WaitSession(steps, performance.now());
+      applyMask();
       setFeedback(score.staves > 1 ? 'Joue les notes entourées, toutes ensemble si elles sont alignées.' : 'Joue la note entourée.');
       markCurrent();
     } else {
@@ -273,6 +293,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
       view.dataset.onsets = JSON.stringify(rhythm.targets.map((t) => [t.beat, t.midi, t.note.tieEnd - t.note.beat, dynOf[measureAt(score, t.note.beat)] ?? '']));
       setCount(`${bpm} bpm`);
       judged = 0;
+      applyMask();
       dynSection = -1;
     }
     sawVelocity = false;
@@ -285,6 +306,8 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     clicks = null;
     wait = null;
     clearMarks();
+    applyMask();
+    sv.peek(false);
     viewBeat = mode === 'wait' ? steps[0]?.beat ?? 0 : -2;
     sv.place(viewBeat, false);
     setFeedback('');
@@ -377,6 +400,8 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
           msg += ` C’est ${step.midis.map(nameOf).join(' + ')} : regarde où ${step.midis.length > 1 ? 'ils se placent' : 'il se place'} sur la portée.`;
         }
         setFeedback(msg, 'bad');
+        // Behind the curtain, two misses lift it for this note.
+        if (sv.maskedBeats && wait.currentWrong >= 2) sv.peek(true);
           } else if (fb.kind === 'partial') {
         setFeedback('…et l’autre note en même temps.');
       } else if (fb.kind === 'correct') {
@@ -385,6 +410,8 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
         for (const n of step.notes) setMark(n, clean ? 'ok' : 'late');
         setFeedback(clean ? '✓' : '✓ Trouvé.', clean ? 'good' : '');
         markCurrent();
+        sv.peek(false);
+        applyMask();
         if (fb.done) window.setTimeout(() => finish(false), 450);
         else if (cfg.stopWhen?.(wait.results)) window.setTimeout(() => finish(true), 450);
       }

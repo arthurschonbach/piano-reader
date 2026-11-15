@@ -144,6 +144,21 @@ const startExercise = async (page: Page) => {
   const pf = await page.textContent('.results');
   ok(!!pf && pf.includes('Séance validée') && pf.includes('+50') && pf.includes('100 %notes tenues'), `dynamics lesson validated with a clear contrast (${pf?.slice(0, 200)})`);
 
+  // Reading ahead: a curtain hides the beat in front of the cursor.
+  await page.goto('http://localhost:5199/#/lecon/lire-en-avance');
+  await startExercise(page);
+  const curtain = (await page.evaluate(`(() => {
+    const m = document.querySelector('.strip-mask');
+    const r = m.getBoundingClientRect();
+    return { hidden: m.hidden, w: r.width, label: [...document.querySelectorAll('.tools .btn')].map((b) => b.textContent).find((t) => t.startsWith('Cache')) };
+  })()`)) as { hidden: boolean; w: number; label: string };
+  ok(!curtain.hidden && curtain.w > 20 && curtain.label === 'Cache : 1 temps', `look-ahead: curtain shown (${JSON.stringify(curtain)})`);
+  await page.click('.tools .btn:has-text("Cache")'); // 2 beats: harder, still counted
+  ok(!(await page.isVisible('.assisted')), 'look-ahead: a bigger curtain keeps the session counted');
+  await page.click('.tools .btn:has-text("Cache")'); // off
+  ok(await page.isVisible('.assisted'), 'look-ahead: removing the curtain marks the session as not counted');
+  ok(await page.evaluate(`document.querySelector('.strip-mask').hidden`), 'look-ahead: curtain removed');
+
   // Daily session: warm-up first, then "Continuer".
   await page.goto('http://localhost:5199/#/seance');
   await startExercise(page);

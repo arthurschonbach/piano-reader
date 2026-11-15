@@ -86,6 +86,7 @@ const GROUPS: { title: string; terms: Term[] }[] = [
       { fr: 'mains séparées / ensemble', en: 'hands separately / hands together', def: 'D’abord chaque main seule, puis les deux.' },
       { fr: 'mouvement parallèle / contraire', en: 'parallel / contrary motion', def: 'Les deux mains vont dans le même sens / en sens inverse, comme dans un miroir.' },
       { fr: 'lecture à vue', en: 'sight-reading', def: 'Jouer une partition jamais vue, d’un bout à l’autre sans s’arrêter.' },
+      { fr: 'lecture anticipée', en: 'reading ahead (look-ahead)', def: 'Lire une ou deux notes plus loin que celle qu’on joue.' },
       { fr: 'pédale forte', en: 'sustain pedal (damper pedal)', def: 'La pédale de droite : les notes continuent de sonner.' }
     ]
   },

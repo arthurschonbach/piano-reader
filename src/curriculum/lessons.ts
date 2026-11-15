@@ -65,6 +65,8 @@ export interface Lesson {
   dynamics?: boolean;
   /** Extra conditions on the touch (MIDI velocity) to pass. */
   touch?: TouchReq;
+  /** Look-ahead: beats hidden in front of the cursor. */
+  mask?: number;
 }
 
 export interface TouchReq {
@@ -626,6 +628,62 @@ export const LESSONS: Lesson[] = [
     ],
     bars: 16,
     bpm: 60
+  },
+  {
+    id: 'lire-en-avance',
+    number: 22,
+    title: 'Lire en avance',
+    goal: 'Les notes disparaissent sous un cache juste avant d’être jouées : lis-les avant qu’elles y entrent.',
+    setup: 'Main droite en position de C, main gauche en position de C3.',
+    theory: [
+      'Un bon lecteur ne regarde jamais la note qu’il joue : ses yeux sont déjà une ou deux notes plus loin. C’est la lecture anticipée (reading ahead), le réflexe n°1 de la lecture à vue.',
+      'Ici, un cache couvre un temps devant le curseur. Quand une note y entre, tu dois déjà savoir ce que c’est : lis-la pendant qu’elle approche, garde-la en tête, joue-la au moment où elle passe le curseur.',
+      'Au début, ça donne le vertige : on a l’impression de jouer « de mémoire ». C’est exactement le but. Garde le tempo lent, la musique reste simple.',
+      'Le bouton « Cache » règle la taille du cache sur n’importe quel exercice au tempo. L’enlever pendant cette leçon rend la séance non comptée.'
+    ],
+    mode: 'rhythm',
+    arrangement: 'alternate',
+    rh: C_RH,
+    lh: C_LH,
+    keyFifths: 0,
+    rhythms: [
+      [[4], 1],
+      [[2, 2], 3],
+      [[2, 1, 1], 2],
+      [[1, 1, 2], 2],
+      [[1, 1, 1, 1], 2]
+    ],
+    bars: 8,
+    bpm: 60,
+    mask: 1
+  },
+  {
+    id: 'lire-une-demi-mesure-en-avance',
+    number: 23,
+    title: 'Une demi-mesure d’avance',
+    goal: 'Mélodie et accords cachés deux temps à l’avance.',
+    setup: 'Main droite en position de C. Main gauche sur les accords I, IV et V7.',
+    theory: [
+      'Le cache couvre maintenant deux temps, soit une demi-mesure : tu lis un groupe de notes d’un coup, pas une note à la fois.',
+      'Regarde d’abord le début de la mesure suivante : quel accord à gauche (I, IV ou V7), et sur quelle note commence la mélodie. Le reste de la mesure suit souvent le motif d’avant.',
+      'Si tu te perds, ne t’arrête pas : retrouve le premier temps de la mesure suivante.'
+    ],
+    mode: 'rhythm',
+    arrangement: 'together',
+    rh: C_RH_MELODY,
+    lh: C_LH_CHORD_HAND,
+    accomp: { melody: 'rh', chords: C_LH_CHORDS, patterns: [[P.wholeChord, 2], [P.halfChords, 3]] },
+    leapShape: MELODY_SHAPE,
+    keyFifths: 0,
+    rhythms: [
+      [[4], 1],
+      [[2, 2], 3],
+      [[2, 1, 1], 2],
+      [[1, 1, 2], 2]
+    ],
+    bars: 8,
+    bpm: 60,
+    mask: 2
   }
 ];
 

@@ -165,6 +165,13 @@ button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent);
 .strip { position: absolute; left: 0; top: 0; width: 1px; will-change: transform; }
 .strip-tile { position: absolute; top: 0; display: block; }
 .strip-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.strip-mask {
+  position: absolute; top: 0; bottom: 0; pointer-events: none;
+  background: color-mix(in srgb, var(--paper) 90%, var(--ink));
+  border-left: 1px dashed var(--line); border-right: 1px dashed var(--muted);
+  transition: opacity 200ms;
+}
+.strip-mask.peek { opacity: 0.12; }
 .feedback {
   /* Fixed height: a longer message must never resize the score above it. */
   text-align: center; height: 3.2em; padding: 4px 16px; font-size: 1.1rem; font-weight: 600; line-height: 1.3;

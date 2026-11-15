@@ -2,9 +2,9 @@
  * Every kind of practice, ready to play: a lesson exercise, a stage of a piece,
  * the reading warm-up, sight-reading. Each records progress and shows results.
  */
-import { blockPasses, flashLesson, passes, sightReadingLesson } from '../curriculum/coach';
+import { blockPasses, flashLesson, lessonDone, passes, sightReadingLesson } from '../curriculum/coach';
 import { generateExercise } from '../curriculum/generate';
-import { MASTERY, type Lesson, type TouchReq } from '../curriculum/lessons';
+import { LESSONS, MASTERY, type Lesson, type TouchReq } from '../curriculum/lessons';
 import { PIECE_STAGES, pieceScore, type Piece } from '../curriculum/pieces';
 import { recordLesson, recordPiece, recordPractice, validatedDays, weaknessMap } from '../progress/store';
 import type { App } from './app';
@@ -118,7 +118,8 @@ export function playLesson(root: HTMLElement, app: App, lesson: Lesson, hooks: H
       : `Leçon validée avec ${percent(MASTERY.rhythm.accuracy)} de notes justes et à temps (écart < ${MASTERY.rhythm.timingMs} ms) à ${lesson.bpm} bpm`) +
     (touchRule.length ? `, ${touchRule.join(', ')}` : '') +
     `, ${MASTERY.days} jours différents.` +
-    (lesson.touch ? ' Les nuances se mesurent avec le piano branché en MIDI.' : '');
+    (lesson.touch ? ' Les nuances se mesurent avec le piano branché en MIDI.' : '') +
+    (lesson.mask ? ` Cache de ${lesson.mask} temps obligatoire.` : '');
   const melodyStaff = lesson.accomp ? (lesson.accomp.melody === 'rh' ? 0 : 1) : undefined;
   let cleanup = () => undefined as void;
   const again = () => {
@@ -132,6 +133,7 @@ export function playLesson(root: HTMLElement, app: App, lesson: Lesson, hooks: H
     bpm: lesson.bpm,
     targetBpm: lesson.bpm,
     melodyStaff,
+    mask: lesson.mask,
     intro: { heading: lesson.title, paragraphs: review ? [lesson.goal] : [lesson.goal, ...lesson.theory], setup: lesson.setup, criteria },
     onExit: hooks.onExit,
     onFinish: (o, show) => {
@@ -186,6 +188,9 @@ export function playFlash(root: HTMLElement, app: App, hooks: Hooks): () => void
 
 export function playSight(root: HTMLElement, app: App, hooks: Hooks): () => void {
   const lesson = sightReadingLesson(app.progress);
+  // Once reading ahead has been learnt, sight-reading keeps a one-beat curtain.
+  const ahead = LESSONS.find((l) => l.id === 'lire-en-avance');
+  const mask = ahead && lessonDone(app.progress, ahead) ? 1 : 0;
   const score = generateExercise(lesson, { seed: seed(), weakness: weaknessMap(app.progress), bars: 8 });
   let cleanup = () => undefined as void;
   const again = () => {
@@ -197,7 +202,8 @@ export function playSight(root: HTMLElement, app: App, hooks: Hooks): () => void
     score,
     mode: 'rhythm',
     bpm: lesson.bpm,
-    intro: { heading: 'Lecture à vue', paragraphs: [lesson.goal, ...lesson.theory] },
+    mask,
+    intro: { heading: 'Lecture à vue', paragraphs: [lesson.goal, ...lesson.theory, ...(mask ? ['Un cache d’un temps t’oblige à lire en avance.'] : [])] },
     onExit: hooks.onExit,
     onFinish: (o, show) => {
       app.setProgress(recordPractice(app.progress, o.metrics));

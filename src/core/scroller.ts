@@ -29,6 +29,9 @@ const POOL = 6;
 export class ScrollStrip {
   private strip: HTMLDivElement;
   private overlayCanvas: HTMLCanvasElement;
+  /** Curtain over the notes about to be played (look-ahead practice). */
+  private mask: HTMLDivElement;
+  private maskBeats = 0;
   private overlay: ScoreRenderer;
   private probe: ScoreRenderer;
   private tiles: Tile[] = [];
@@ -46,7 +49,11 @@ export class ScrollStrip {
     this.strip.className = 'strip';
     this.overlayCanvas = document.createElement('canvas');
     this.overlayCanvas.className = 'strip-overlay';
-    stage.append(this.strip, this.overlayCanvas);
+    this.mask = document.createElement('div');
+    this.mask.className = 'strip-mask';
+    this.mask.hidden = true;
+    // Above the music, under the cursor and the pinned clefs.
+    stage.append(this.strip, this.mask, this.overlayCanvas);
     this.overlay = new ScoreRenderer(this.overlayCanvas, false);
     // Off-screen renderer, only used to compute the layout at the stage size.
     this.probe = new ScoreRenderer(document.createElement('canvas'));
@@ -66,7 +73,38 @@ export class ScrollStrip {
       t.dirty = true;
     }
     this.overlayDirty = true;
+    this.layoutMask();
     if (!this.anim) this.place(this.restBeat, false);
+  }
+
+  /**
+   * Hide the notes from the current beat to `beats` ahead (0 = no curtain),
+   * so they have to be read before they arrive. The curtain is fixed: the
+   * music slides under it.
+   */
+  setMask(beats: number): void {
+    this.maskBeats = beats;
+    this.layoutMask();
+  }
+
+  get maskedBeats(): number {
+    return this.maskBeats;
+  }
+
+  /** Lift the curtain for a moment (a hint after mistakes). */
+  peek(on: boolean): void {
+    this.mask.classList.toggle('peek', on);
+  }
+
+  private layoutMask(): void {
+    this.mask.hidden = !this.geo || this.maskBeats <= 0;
+    if (this.mask.hidden || !this.geo) return;
+    const { SP, lead, pxQ, anchorX } = this.geo;
+    // Noteheads sit 0.65 SP after their beat; leave room for an accidental on either side.
+    const noteX = anchorX + lead + 0.65 * SP;
+    const left = noteX - 1.6 * SP;
+    this.mask.style.left = `${left}px`;
+    this.mask.style.width = `${Math.max(SP, noteX + this.maskBeats * pxQ - 1.7 * SP - left)}px`;
   }
 
   setOptions(o: Partial<ViewOptions>): void {
@@ -206,6 +244,7 @@ export class ScrollStrip {
   destroy(): void {
     this.stopAnimation();
     this.strip.remove();
+    this.mask.remove();
     this.overlayCanvas.remove();
   }
 }
