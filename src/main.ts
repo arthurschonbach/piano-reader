@@ -1,8 +1,9 @@
 import './styles.css';
-import { lessonById, playable } from './curriculum/lessons';
+import { lessonById } from './curriculum/lessons';
+import { playLesson } from './ui/activities';
 import { createApp } from './ui/app';
-import { renderExercise } from './ui/exercise';
 import { renderHome } from './ui/home';
+import { renderPiece, renderPieceStage, renderPlacement, renderProgress, renderSession, renderSettings } from './ui/screens';
 
 const root = document.getElementById('app') as HTMLElement;
 const app = createApp();
@@ -12,11 +13,26 @@ function route(): void {
   cleanup?.();
   cleanup = null;
   root.innerHTML = '';
-  const m = /^#\/lecon\/([\w-]+)/.exec(location.hash);
-  const lesson = m ? lessonById(m[1]) : undefined;
-  if (lesson && playable(lesson)) cleanup = renderExercise(root, app, lesson);
-  else {
-    if (location.hash !== '#/' && location.hash !== '') history.replaceState(null, '', '#/');
+  window.scrollTo(0, 0);
+  const hash = location.hash.replace(/\?.*$/, '');
+  const home = () => app.go('#/');
+  let m: RegExpExecArray | null;
+  if ((m = /^#\/lecon\/([\w-]+)$/.exec(hash)) && lessonById(m[1])) {
+    cleanup = playLesson(root, app, lessonById(m[1])!, { onExit: home });
+  } else if ((m = /^#\/morceau\/([\w-]+)\/(\d+)$/.exec(hash))) {
+    cleanup = renderPieceStage(root, app, m[1], Number(m[2]));
+  } else if ((m = /^#\/morceau\/([\w-]+)$/.exec(hash))) {
+    cleanup = renderPiece(root, app, m[1]);
+  } else if (hash === '#/seance') {
+    cleanup = renderSession(root, app);
+  } else if (hash === '#/test') {
+    cleanup = renderPlacement(root, app);
+  } else if (hash === '#/progres') {
+    cleanup = renderProgress(root, app);
+  } else if (hash === '#/reglages') {
+    cleanup = renderSettings(root, app);
+  } else {
+    if (hash !== '#/' && hash !== '') history.replaceState(null, '', '#/');
     cleanup = renderHome(root, app);
   }
 }

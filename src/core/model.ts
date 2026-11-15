@@ -21,6 +21,8 @@ export interface NoteItem {
   tieTarget: NoteItem | null;
   dots: number;
   printed: string | null;
+  /** Suggested finger, 1 (thumb) to 5 (little finger). */
+  finger?: number;
 }
 
 export interface Measure {
@@ -92,7 +94,8 @@ export function makeNote(p: Partial<NoteItem> & { beat: number; dur: number }): 
     tieEnd: p.beat + p.dur,
     tieTarget: null,
     dots: p.dots ?? 0,
-    printed: p.printed ?? null
+    printed: p.printed ?? null,
+    finger: p.finger
   };
 }
 
@@ -139,10 +142,8 @@ export function computeTies(score: Score): void {
   }
 }
 
-const FR = ['Do', 'Ré', 'Mi', 'Fa', 'Sol', 'La', 'Si'];
-
-/** French solfège name without octave: "Do", "Fa♯", "Si♭". */
-export function frenchName(s: Spelled): string {
+/** Letter name without octave: "C", "F♯", "B♭". */
+export function noteName(s: Spelled): string {
   const acc = s.alter === 1 ? '♯' : s.alter === -1 ? '♭' : s.alter === 2 ? '𝄪' : s.alter === -2 ? '𝄫' : '';
-  return `${FR[s.step]}${acc}`;
+  return `${LETTERS[s.step]}${acc}`;
 }

@@ -1,21 +1,42 @@
 import { CanvasContext, Glyph } from 'vexflow';
-import { frenchName, measureAt, totalBeats, type Measure, type NoteItem, type Score } from './model';
+import { noteName, measureAt, totalBeats, type Measure, type NoteItem, type Score } from './model';
 
 const K = 0.001036;
-export const HAND = ['#201b13', '#201b13'];
-const INK = '#201b13';
-const PLAYED = '#cfc8bb';
-const REST_C = '#8a8378';
-const REST_PLAYED = '#e2dccd';
-const STAFF = '#ddd5c4';
-const BAR = '#a89e8c';
-const ACCENT = '#d9481c';
-const MARK_COLOR: Record<Mark, string> = {
-  current: INK,
-  ok: '#2e8b57',
-  late: '#d98a1c',
-  bad: '#d32f2f'
+/** Score colors. Swapped wholesale for dark mode via setPalette(). */
+export interface Palette {
+  paper: string;
+  ink: string;
+  played: string;
+  rest: string;
+  restPlayed: string;
+  staff: string;
+  bar: string;
+  accent: string;
+  good: string;
+  late: string;
+  bad: string;
+  halo: string;
+  haloBad: string;
+  labelHalo: string;
+}
+
+export const LIGHT: Palette = {
+  paper: '#fbfaf7', ink: '#201b13', played: '#cfc8bb', rest: '#8a8378', restPlayed: '#e2dccd',
+  staff: '#ddd5c4', bar: '#a89e8c', accent: '#d9481c', good: '#2e8b57', late: '#d98a1c', bad: '#d32f2f',
+  halo: 'rgba(217,72,28,0.13)', haloBad: 'rgba(211,47,47,0.16)', labelHalo: 'rgba(251,250,247,0.92)'
 };
+
+export const DARK: Palette = {
+  paper: '#1a1916', ink: '#ece6da', played: '#5c564c', rest: '#9a9284', restPlayed: '#4a463f',
+  staff: '#4a453c', bar: '#857c6d', accent: '#f0703f', good: '#4cc17f', late: '#e8a640', bad: '#f0605c',
+  halo: 'rgba(240,112,63,0.22)', haloBad: 'rgba(240,96,92,0.25)', labelHalo: 'rgba(26,25,22,0.92)'
+};
+
+let P: Palette = LIGHT;
+
+export function setPalette(p: Palette): void {
+  P = p;
+}
 
 /** Wait-mode feedback per note: to play now, right first time, right after mistakes, wrong key just pressed. */
 export type Mark = 'current' | 'ok' | 'late' | 'bad';
@@ -96,6 +117,8 @@ export interface DrawState {
   marks?: ReadonlyMap<NoteItem, Mark>;
   /** Draw the vertical play-position line (default true). */
   cursor?: boolean;
+  /** Draw suggested fingers (default true). */
+  fingers?: boolean;
   /** Notes whose name is shown even when `names` is off (hints). */
   labels?: ReadonlySet<NoteItem>;
 }
@@ -118,14 +141,14 @@ function stateOf(beat: number, end: number, t: number, lookahead: number): numbe
 }
 
 function colorOf(state: number, hand: number, rest: boolean): string {
-  if (rest) return state === 0 ? REST_PLAYED : REST_C;
-  if (state === 0) return PLAYED;
-  if (state === 3) return INK;
-  return HAND[hand];
+  void hand;
+  if (rest) return state === 0 ? P.restPlayed : P.rest;
+  if (state === 0) return P.played;
+  return P.ink;
 }
 
 function clusterColor(c: Cluster, staff: number): string {
-  if (c.mark && !c.rest) return MARK_COLOR[c.mark];
+  if (c.mark && !c.rest) return c.mark === 'current' ? P.ink : c.mark === 'ok' ? P.good : c.mark === 'late' ? P.late : P.bad;
   return colorOf(c.state, staff, c.rest);
 }
 
@@ -187,7 +210,7 @@ export class ScoreRenderer {
     const { ctx, w, h } = this;
     if (w < 2 || h < 2) return;
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = '#fbfaf7';
+    ctx.fillStyle = P.paper;
     ctx.fillRect(0, 0, w, h);
 
     const U = s.zoom;
@@ -208,7 +231,9 @@ export class ScoreRenderer {
     const bassBottom = bassTop + staffH;
     const staffTop = [trebleTop, bassTop];
     const staffBottom = [trebleBottom, bassBottom];
-    const bottomIdx = [30, 18];
+    // Lowest staff line as a diatonic index: E4 for a treble staff, G2 for a bass staff.
+    const clefsArr = score.clefs ?? ['G', 'F'];
+    const bottomIdx = [0, 1].map((st) => ((clefsArr[st] ?? (st ? 'F' : 'G')) === 'F' ? 18 : 30));
     const yIdxFor = (st: number) => (idx: number) => staffBottom[st] - (idx - bottomIdx[st]) * (SP / 2);
 
     const m0 = score.measures[0];
@@ -233,7 +258,7 @@ export class ScoreRenderer {
 
     // progression wash removed — sobre: plain paper
 
-    ctx.strokeStyle = STAFF;
+    ctx.strokeStyle = P.staff;
     ctx.lineWidth = 1;
     const stCount = single ? 1 : 2;
     for (let st = 0; st < stCount; st++) {
@@ -259,13 +284,13 @@ export class ScoreRenderer {
       const bx = xOf(m.startBeat);
       // Bar 1 opens the system: its line sits before the clef, not on the first note.
       const lineX = m.number === 1 ? bx - lead : bx;
-      ctx.strokeStyle = BAR;
+      ctx.strokeStyle = P.bar;
       ctx.lineWidth = 1.2;
       ctx.beginPath();
       ctx.moveTo(lineX, trebleTop);
       ctx.lineTo(lineX, single ? trebleBottom : bassBottom);
       ctx.stroke();
-      ctx.fillStyle = BAR;
+      ctx.fillStyle = P.bar;
       ctx.font = `${10 * U}px system-ui, sans-serif`;
       ctx.textAlign = 'left';
       ctx.fillText(String(m.number), bx + 4 * U, trebleTop - 6 * U);
@@ -273,7 +298,7 @@ export class ScoreRenderer {
     }
     if (!score.infinite && score.measures.length) {
       const fx = xOf(totalBeats(score));
-      ctx.strokeStyle = INK;
+      ctx.strokeStyle = P.ink;
       ctx.lineWidth = 1.2;
       ctx.beginPath();
       ctx.moveTo(fx - 4.5 * U, trebleTop);
@@ -281,7 +306,7 @@ export class ScoreRenderer {
       ctx.moveTo(fx, trebleTop);
       ctx.lineTo(fx, single ? trebleBottom : bassBottom);
       ctx.stroke();
-      ctx.fillStyle = INK;
+      ctx.fillStyle = P.ink;
       ctx.fillRect(fx + 1.6 * U, trebleTop, 3.4 * U, (single ? trebleBottom : bassBottom) - trebleTop);
     }
 
@@ -290,7 +315,7 @@ export class ScoreRenderer {
       for (const c of list) {
         if (c.mark !== 'current' && c.mark !== 'bad') continue;
         const yIdx = yIdxFor(c.staff);
-        ctx.fillStyle = c.mark === 'bad' ? 'rgba(211,47,47,0.16)' : 'rgba(217,72,28,0.13)';
+        ctx.fillStyle = c.mark === 'bad' ? P.haloBad : P.halo;
         for (const n of c.members) {
           ctx.beginPath();
           ctx.arc(c.x + headW0 / 2, yIdx(idxOf(n)), 1.5 * SP, 0, Math.PI * 2);
@@ -311,7 +336,7 @@ export class ScoreRenderer {
         for (const v of voices) {
           drawStream(ctx, list.filter((c) => c.voice === v), {
             st, SP, staffTop, staffBottom, bottomIdx, yIdx: yIdxFor(st), midIdx: bottomIdx[st] + 8,
-            acc
+            acc, fingers: s.fingers !== false
           });
         }
       }
@@ -343,7 +368,7 @@ export class ScoreRenderer {
       ctx.textAlign = 'center';
       ctx.font = `600 ${Math.max(9, 1.1 * SP)}px system-ui, sans-serif`;
       ctx.lineWidth = 3.5;
-      ctx.strokeStyle = 'rgba(251,250,247,0.92)';
+      ctx.strokeStyle = P.labelHalo;
       for (let j = 0; j < visible.length; j++) {
         for (const c of measureClusters[j]) {
           if (c.rest || c.grace) continue;
@@ -351,16 +376,45 @@ export class ScoreRenderer {
           ctx.fillStyle = clusterColor(c, c.staff);
           const nx = c.x + gbox('noteheadBlack', 4 * SP).w / 2;
           const ny = staffBottom[c.staff] + Math.max(15, 2.9 * SP);
-          const name = frenchName(c.primary.spell);
+          const name = noteName(c.primary.spell);
           ctx.strokeText(name, nx, ny);
           ctx.fillText(name, nx, ny);
         }
       }
     }
 
+    // Once bar 1 has scrolled away, keep clefs and key signature pinned on the left.
+    if (m0 && xOf(m0.startBeat) - lead < 0) {
+      const cur = score.measures[measureAt(score, Math.max(0, s.beat))] ?? m0;
+      const clefW = Math.max(gbox('gClef', 4 * SP).w, gbox('fClef', 4 * SP).w);
+      const pinW = 1.0 * SP + clefW + 0.4 * SP + Math.abs(cur.key) * 1.08 * SP + 0.9 * SP;
+      const bottom = single ? trebleBottom : bassBottom;
+      ctx.fillStyle = P.paper;
+      ctx.fillRect(0, trebleTop - 3 * SP, pinW, bottom - trebleTop + 6 * SP);
+      const fade = ctx.createLinearGradient(pinW, 0, pinW + 2 * SP, 0);
+      fade.addColorStop(0, P.paper);
+      const hex = P.paper.replace('#', '');
+      const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+      fade.addColorStop(1, `rgba(${r},${g},${b},0)`);
+      ctx.fillStyle = fade;
+      ctx.fillRect(pinW, trebleTop - 3 * SP, 2 * SP, bottom - trebleTop + 6 * SP);
+      ctx.strokeStyle = P.staff;
+      ctx.lineWidth = 1;
+      for (let st = 0; st < stCount; st++) {
+        for (let l = 0; l < 5; l++) {
+          const y = staffTop[st] + l * SP;
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(pinW + 2 * SP, y);
+          ctx.stroke();
+        }
+      }
+      this.drawMeasureHeader(score, { ...cur, number: 1, keyChange: true, time: null }, 0, SP, staffTop, bottomIdx, yIdxFor, single);
+    }
+
     if (s.cursor === false) return;
     const px = xOf(s.beat);
-    ctx.strokeStyle = ACCENT;
+    ctx.strokeStyle = P.accent;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(px, trebleTop - 8);
@@ -375,6 +429,8 @@ export class ScoreRenderer {
   ): void {
     const clefs = score.clefs ?? ['G', 'F'];
     const staves = single ? 1 : 2;
+    // Clefs, key and time signatures in full ink: beginners read them.
+    this.ctx.fillStyle = P.ink;
     const isFirst = m.number === 1;
     const wantClef = isFirst || m.number % 10 === 1;
     const wantKey = m.keyChange && !isFirst;
@@ -499,6 +555,7 @@ interface StreamEnv {
   yIdx: (idx: number) => number;
   midIdx: number;
   acc: Map<number, number>;
+  fingers: boolean;
 }
 
 function drawStream(ctx: CanvasRenderingContext2D, list: Cluster[], e: StreamEnv): void {
@@ -557,6 +614,18 @@ function drawStream(ctx: CanvasRenderingContext2D, list: Cluster[], e: StreamEnv
       if (accDraw !== null) {
         const g = accGlyph(accDraw);
         drawG(g, 4 * SP, gx - 0.3 * SP - gbox(g, 4 * SP).w, y, 'cink');
+      }
+      if (e.fingers && n.finger && !c.grace) {
+        // Opposite the stem, close to the note head; whole notes: right hand above, left hand below.
+        const up = avgUp(c, e.midIdx);
+        const above = c.base < 4 ? !up : st === 0;
+        const fy = y + (above ? -1.75 : 1.75) * SP;
+        ctx.save();
+        ctx.font = `700 ${1.25 * SP}px system-ui, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(String(n.finger), gx + hw / 2, fy);
+        ctx.restore();
       }
       for (let d = 0; d < n.dots; d++) {
         const dy = onLine ? y - SP / 2 : y;

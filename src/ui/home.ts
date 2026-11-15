@@ -1,97 +1,147 @@
-import { frenchName, spellOfMidi } from '../core/model';
-import { LESSONS, MASTERY, playable } from '../curriculum/lessons';
+import { currentLesson, currentPiece, dailyPlan, duePieces, lessonDone } from '../curriculum/coach';
+import { LESSONS, MASTERY } from '../curriculum/lessons';
+import { PIECES, PIECE_STAGES } from '../curriculum/pieces';
 import type { MidiStatus } from '../input/midi';
-import { validatedDays, weakestNotes } from '../progress/store';
+import { practisedToday, streak, validatedDays, weakestNotes } from '../progress/store';
 import type { App } from './app';
-import { button, h, percent } from './dom';
+import { button, h, percent, themeButton } from './dom';
+import { nameOf } from './player';
 
-function pianoCard(app: App, s: MidiStatus, card: HTMLElement): void {
-  card.innerHTML = '';
-  card.dataset.state = s.state === 'ready' ? (s.devices.length ? 'connected' : 'empty') : s.state;
-  const title = h('div', 'pc-title');
-  const text = h('p', 'pc-text');
-  card.append(title, text);
+function pianoStatus(app: App, s: MidiStatus, el: HTMLElement): void {
+  el.innerHTML = '';
+  el.dataset.state = s.state === 'ready' ? (s.devices.length ? 'connected' : 'empty') : s.state;
+  const text = h('span', 'ps-text');
+  el.append(h('span', 'ps-dot'), text);
   switch (s.state) {
     case 'unsupported':
-      title.textContent = 'Pas de MIDI sur cet appareil';
-      text.textContent =
-        'Les navigateurs d’iPad et d’iPhone ne reçoivent pas le MIDI. Pour jouer sur ton FP-10, ouvre ce site dans Chrome sur ton téléphone Android. Ici, tu peux t’entraîner avec le clavier à l’écran.';
+      text.textContent = 'Pas de MIDI dans ce navigateur : clavier à l’écran. Sur iPad, ouvre le site dans MIDIWeb Browser.';
       break;
     case 'idle':
-      title.textContent = 'Branche ton piano';
-      text.textContent =
-        'Câble USB entre la prise USB COMPUTER (carrée) à l’arrière du FP-10 et ton téléphone, piano allumé. Puis :';
-      card.append(button('Connecter le piano', 'btn primary', () => void app.midi.request()));
+      text.textContent = 'Piano non connecté.';
+      el.append(button('Connecter le piano', 'btn primary small', () => void app.midi.request()));
       break;
     case 'asking':
-      title.textContent = 'Autorisation…';
-      text.textContent = 'Accepte l’accès aux appareils MIDI dans la fenêtre de Chrome.';
+      text.textContent = 'Accepte l’accès aux appareils MIDI…';
       break;
     case 'denied':
-      title.textContent = 'Accès MIDI refusé';
-      text.textContent =
-        'Dans Chrome : touche l’icône à gauche de l’adresse → Autorisations → Appareils MIDI → Autoriser. Puis :';
-      card.append(button('Réessayer', 'btn', () => void app.midi.request()));
+      text.textContent = 'Accès MIDI refusé. Autorise « Appareils MIDI » dans les réglages du site, puis :';
+      el.append(button('Réessayer', 'btn small', () => void app.midi.request()));
       break;
     case 'ready':
-      if (!s.devices.length) {
-        title.textContent = 'Aucun piano détecté';
-        text.textContent = 'Vérifie le câble et que le piano est allumé : il apparaîtra tout seul. En attendant, le clavier à l’écran prend le relais.';
-      } else {
-        title.textContent = `✓ Piano connecté : ${s.devices.join(', ')}`;
-        text.textContent = 'Joue une note pour tester.';
-        text.classList.add('pc-live');
-      }
+      text.textContent = s.devices.length
+        ? `${s.devices.join(', ')} connecté · joue une note pour tester`
+        : 'Aucun piano détecté : vérifie le Bluetooth ou le câble. Clavier à l’écran en attendant.';
       break;
   }
 }
 
 export function renderHome(root: HTMLElement, app: App): () => void {
+  const p = app.progress;
   const page = h('div', 'page');
-  page.append(h('h1', 'title', 'Piano Reader'), h('p', 'sub', 'Ton assistant pour apprendre à lire et jouer.'));
 
-  const card = h('section', 'piano-card');
-  page.append(card);
-  const draw = (s: MidiStatus) => pianoCard(app, s, card);
-  draw(app.midi.status);
-  const offMidi = app.midi.onChange(draw);
+  const head = h('header', 'home-head');
+  const titles = h('div');
+  titles.append(h('h1', 'title', 'Piano Reader'), h('p', 'sub', 'Ton coach de piano, à ton rythme.'));
+  const headBtns = h('div', 'head-btns');
+  const gear = button('⚙︎', 'btn icon', () => app.go('#/reglages'));
+  gear.setAttribute('aria-label', 'Réglages');
+  headBtns.append(themeButton(app), gear);
+  head.append(titles, headBtns);
+  page.append(head);
+
+  const status = h('div', 'piano-status');
+  const drawStatus = (s: MidiStatus) => pianoStatus(app, s, status);
+  drawStatus(app.midi.status);
+  const offMidi = app.midi.onChange(drawStatus);
   const offBus = app.bus.on((e) => {
-    const live = card.querySelector('.pc-live');
-    if (live && e.on) live.textContent = `Dernière note : ${frenchName(spellOfMidi(e.midi))} ✓`;
+    const t = status.querySelector('.ps-text');
+    if (t && e.on && app.midi.connected) t.textContent = `${nameOf(e.midi)} ✓ · ${app.midi.status.state === 'ready' ? app.midi.status.devices[0] : ''} connecté`;
   });
+  page.append(status);
 
-  page.append(h('h2', 'sect', 'Ton parcours'));
+  // --- First visit: find the right level ---
+  if (!p.onboarded) {
+    const card = h('section', 'card hero');
+    card.append(
+      h('h2', undefined, 'Bienvenue !'),
+      h('p', undefined, 'Pour commencer au bon endroit, fais le test de niveau : quelques notes à lire et jouer, de plus en plus difficiles. 5 minutes environ.'),
+      button('Faire le test de niveau', 'btn primary big', () => app.go('#/test')),
+      button('Commencer au début', 'btn', () => {
+        app.setProgress({ ...app.progress, onboarded: true });
+        app.refresh();
+      })
+    );
+    page.append(card);
+  }
+
+  // --- Today's session ---
+  const plan = dailyPlan(p);
+  const today = h('section', 'card today');
+  const s = streak(p);
+  const head2 = h('div', 'today-head');
+  head2.append(h('h2', undefined, practisedToday(p) ? 'Séance du jour ✓' : 'Ta séance du jour'), h('span', 'streak', s ? `🔥 ${s} jour${s > 1 ? 's' : ''}` : ''));
+  today.append(head2);
+  const ol = h('ol', 'plan');
+  for (const a of plan) ol.append(h('li', undefined, a.label));
+  today.append(ol, h('p', 'hint', 'Environ 20 à 25 minutes. Garde le reste de ta séance pour tes propres morceaux.'));
+  today.append(button(practisedToday(p) ? 'Refaire une séance' : 'Commencer la séance', 'btn primary big', () => app.go('#/seance')));
+  page.append(today);
+
+  // --- Path ---
+  page.append(h('h2', 'sect', 'Parcours'));
+  const cur = currentLesson(p);
   const list = h('ol', 'lessons');
   for (const l of LESSONS) {
-    const rec = app.progress.lessons[l.id];
-    const ok = playable(l);
-    const li = h('li', `lesson${ok ? '' : ' locked'}${rec?.mastered ? ' mastered' : ''}`);
+    const rec = p.lessons[l.id];
+    const done = lessonDone(p, l);
+    const li = h('li', `lesson${done ? ' mastered' : ''}${l === cur ? ' current' : ''}`);
     const meta = h('div', 'meta');
     meta.append(h('div', 't', l.title), h('div', 'd', l.goal));
-    let status = 'Bientôt';
-    if (ok) {
-      if (rec?.mastered) status = '✓ Maîtrisée';
-      else if (rec?.sessions.length) {
-        const last = rec.sessions[rec.sessions.length - 1];
-        status = `${validatedDays(rec)} / ${MASTERY.days} jours validés · dernière séance ${percent(last.accuracy)}`;
-      } else status = 'Pas encore commencée';
-    }
-    meta.append(h('div', 'st', status));
-    li.append(h('div', 'num', String(l.number)), meta);
-    if (ok) li.append(button(rec?.sessions.length ? 'Jouer' : 'Commencer', 'btn primary', () => app.go(`#/lecon/${l.id}`)));
+    let st: string;
+    if (rec?.mastered) st = '✓ Maîtrisée';
+    else if (rec?.acquired) st = '✓ Acquise au test de niveau';
+    else if (rec?.sessions.length) {
+      const last = rec.sessions[rec.sessions.length - 1];
+      st = `${validatedDays(rec)} / ${MASTERY.days} jours validés · dernier essai ${percent(last.accuracy)}`;
+    } else st = l === cur ? 'À travailler maintenant' : l.mode === 'rhythm' ? 'En rythme' : 'Lecture';
+    meta.append(h('div', 'st', st));
+    li.append(h('div', 'num', done ? '✓' : String(l.number)), meta, button(l === cur ? 'Jouer' : 'Ouvrir', l === cur ? 'btn primary' : 'btn', () => app.go(`#/lecon/${l.id}`)));
     list.append(li);
   }
   page.append(list);
 
-  const weak = weakestNotes(app.progress);
+  // --- Pieces ---
+  page.append(h('h2', 'sect', 'Morceaux'));
+  const due = new Set(duePieces(p).map((x) => x.id));
+  const curPiece = currentPiece(p);
+  const pl = h('ul', 'pieces');
+  for (const pc of PIECES) {
+    const r = p.pieces[pc.id];
+    const stage = r?.stage ?? 0;
+    const li = h('li', `piece${stage >= PIECE_STAGES.length ? ' learnt' : ''}${pc === curPiece ? ' current' : ''}`);
+    const meta = h('div', 'meta');
+    let st: string;
+    if (stage >= PIECE_STAGES.length) st = due.has(pc.id) ? '↻ Révision aujourd’hui' : `✓ Appris · révision le ${r?.due?.split('-').reverse().slice(0, 2).join('/')}`;
+    else if (stage > 0) st = `Étape ${stage + 1} / ${PIECE_STAGES.length} · ${PIECE_STAGES[stage].label}`;
+    else st = `Niveau ${'●'.repeat(pc.level)}${'○'.repeat(3 - pc.level)}`;
+    meta.append(h('div', 't', pc.title), h('div', 'd', pc.origin), h('div', 'st', st));
+    li.append(meta, button('Ouvrir', 'btn', () => app.go(`#/morceau/${pc.id}`)));
+    pl.append(li);
+  }
+  page.append(pl);
+
+  // --- Footer links ---
+  const weak = weakestNotes(p);
   if (weak.length) {
     page.append(h('h2', 'sect', 'À travailler'));
-    const p = h('p', 'weak');
-    p.textContent = weak
-      .map((w) => `${frenchName(spellOfMidi(w.midi))} (${percent(w.stat.clean / w.stat.attempts)} juste)`)
-      .join(' · ');
-    page.append(p, h('p', 'hint', 'Les exercices font revenir ces notes plus souvent.'));
+    page.append(h('p', 'weak', weak.map((w) => `${nameOf(w.midi)} (${percent(w.stat.clean / w.stat.attempts)} juste)`).join(' · ')));
   }
+  const links = h('div', 'links');
+  links.append(
+    button('Mes progrès', 'btn', () => app.go('#/progres')),
+    button(p.placement ? 'Refaire le test de niveau' : 'Test de niveau', 'btn', () => app.go('#/test'))
+  );
+  page.append(links);
 
   root.append(page);
   return () => {

@@ -1,5 +1,5 @@
 import type { NoteBus } from './bus';
-import { frenchName, spellOfMidi } from '../core/model';
+import { noteName, spellOfMidi } from '../core/model';
 
 const BLACK = new Set([1, 3, 6, 8, 10]);
 
@@ -34,13 +34,14 @@ export function mountKeyboard(root: HTMLElement, bus: NoteBus, lo: number, hi: n
     key.type = 'button';
     key.className = black ? 'key black' : 'key white';
     key.dataset.midi = String(m);
-    const name = frenchName(spellOfMidi(m));
+    const name = noteName(spellOfMidi(m));
     key.setAttribute('aria-label', name);
     if (!black) {
       const i = whites.indexOf(m);
       key.style.left = `${i * ww}%`;
       key.style.width = `${ww}%`;
-      if (m % 12 === 0) key.textContent = name;
+      // Octave numbers on the Cs, so C4 (middle C) is easy to find.
+      if (m % 12 === 0) key.textContent = `C${m / 12 - 1}`;
     } else {
       const i = whites.indexOf(m - 1);
       key.style.left = `${(i + 1) * ww - ww * 0.3}%`;
@@ -48,7 +49,11 @@ export function mountKeyboard(root: HTMLElement, bus: NoteBus, lo: number, hi: n
     }
     key.addEventListener('pointerdown', (ev) => {
       ev.preventDefault();
-      key.setPointerCapture?.(ev.pointerId);
+      try {
+        key.setPointerCapture?.(ev.pointerId);
+      } catch {
+        // synthetic or already-gone pointer: the press still counts
+      }
       press(key, m, ev.pointerId);
     });
     key.addEventListener('pointerup', (ev) => release(ev.pointerId));

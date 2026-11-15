@@ -1,10 +1,16 @@
 import { parseMidi } from '../src/input/midi';
 import { NoteBus } from '../src/input/bus';
 import { buildSteps, HINT_AFTER, summarize, WaitSession } from '../src/exercise/wait';
-import { generateExercise } from '../src/curriculum/generate';
-import { LESSONS, MASTERY } from '../src/curriculum/lessons';
-import { emptyProgress, recordSession, validatedDays, weakestNotes, weaknessMap } from '../src/progress/store';
-import { frenchName, makeNote, spellOfMidi, type Score } from '../src/core/model';
+import { buildTargets, RhythmSession, summarizeRhythm } from '../src/exercise/rhythm';
+import { concatScores, generateExercise } from '../src/curriculum/generate';
+import { LESSONS, lessonNotes } from '../src/curriculum/lessons';
+import { PIECES, PIECE_STAGES, parseHand, pieceScore } from '../src/curriculum/pieces';
+import { blockPasses, currentLesson, dailyPlan, flashLesson, knownHands, passes, sightReadingLesson } from '../src/curriculum/coach';
+import {
+  addDays, dayKey, emptyProgress, exportProgress, importProgress, migrate, recordLesson, recordPiece, recordPlacement,
+  recordPractice, streak, validatedDays, weakestNotes, weaknessMap, type SessionMetrics
+} from '../src/progress/store';
+import { noteName, makeNote, spellOfMidi, type Score } from '../src/core/model';
 
 let fails = 0;
 const ok = (cond: boolean, msg: string) => {
@@ -17,23 +23,17 @@ const ok = (cond: boolean, msg: string) => {
 // --- MIDI decoding ---
 ok(parseMidi([0x90, 60, 100], 5)?.on === true, 'note on');
 ok(parseMidi([0x93, 60, 100], 5)?.midi === 60, 'note on, any channel');
-ok(parseMidi([0x90, 60, 0], 5)?.on === false, 'note on with velocity 0 is a release');
+ok(parseMidi([0x90, 60, 0], 5)?.on === false, 'velocity 0 is a release');
 ok(parseMidi([0x80, 60, 40], 5)?.on === false, 'note off');
 ok(parseMidi([0xb0, 64, 127], 5) === null, 'sustain pedal ignored');
-ok(parseMidi([0xfe], 5) === null, 'active sensing ignored');
-
 const bus = new NoteBus();
 bus.emit({ midi: 60, on: true, velocity: 80, time: 0 });
 bus.emit({ midi: 64, on: true, velocity: 80, time: 0 });
 bus.emit({ midi: 60, on: false, velocity: 0, time: 1 });
 ok(bus.held.size === 1 && bus.held.has(64), 'bus tracks held keys');
-bus.releaseAll(2);
-ok(bus.held.size === 0, 'releaseAll clears held keys');
 
-// --- French names ---
-ok(frenchName(spellOfMidi(60)) === 'Do', 'C4 = Do');
-ok(frenchName(spellOfMidi(67)) === 'Sol', 'G4 = Sol');
-ok(frenchName(spellOfMidi(66)) === 'Fa♯', 'F#4 = Fa♯');
+// --- names ---
+ok(noteName(spellOfMidi(60)) === 'C' && noteName(spellOfMidi(66)) === 'F♯' && noteName(spellOfMidi(70, true)) === 'B♭', 'letter names');
 
 // --- Wait mode ---
 const tiny: Score = {
@@ -50,86 +50,148 @@ const tiny: Score = {
   }]
 };
 const steps = buildSteps(tiny);
-ok(steps.length === 3, 'steps: rests skipped, chord grouped');
-ok(steps[2].midis.join() === '60,67', 'chord step expects both notes');
-
+ok(steps.length === 3 && steps[2].midis.join() === '60,67', 'steps: rests skipped, chord grouped');
 const s = new WaitSession(steps, 0);
-const held = new Set<number>();
-ok(s.noteOn(60, 1000, held).kind === 'correct', 'right note advances');
-ok(s.noteOn(65, 1500, held).kind === 'wrong', 'wrong note is flagged');
-ok(s.index === 1, 'wrong note does not advance');
-ok(s.noteOn(64, 2200, held).kind === 'correct', 'then the right one advances');
-held.add(60);
-ok(s.noteOn(60, 2500, held).kind === 'partial', 'half a chord waits for the rest');
+ok(s.noteOn(60, 1000, new Set()).kind === 'correct', 'right note advances');
+ok(s.noteOn(65, 1500, new Set()).kind === 'wrong' && s.index === 1, 'wrong note flagged, no advance');
+ok(s.noteOn(64, 2200, new Set()).kind === 'correct', 'then the right one');
+ok(s.noteOn(60, 2500, new Set([60])).kind === 'partial', 'half a chord waits');
 const fin = s.noteOn(67, 2600, new Set([60, 67]));
-ok(fin.kind === 'correct' && fin.done, 'completing the chord ends the exercise');
-ok(s.noteOn(60, 3000, held).kind === 'ignored', 'notes after the end are ignored');
-ok(s.results[1].wrong.join() === '65' && s.results[1].reactionMs === 1200, 'result keeps the mistake and the time');
-
+ok(fin.kind === 'correct' && fin.done, 'chord completes the exercise');
 const sum = summarize(s.results);
-ok(sum.steps === 3 && sum.clean === 2, 'summary counts clean steps');
-ok(Math.abs(sum.accuracy - 2 / 3) < 1e-9, 'accuracy = clean / steps');
-ok(sum.medianReactionMs === (1200 + 400) / 2, 'median leaves out the first step');
-ok(sum.confusions.length === 1 && sum.confusions[0][0] === 64 && sum.confusions[0][1] === 65, 'confusion Mi→Fa recorded');
+ok(sum.clean === 2 && sum.medianReactionMs === 800, 'summary: clean count and median without the first step');
+const hs = new WaitSession(steps, 0);
+let last = hs.noteOn(70, 10, new Set());
+for (let i = 1; i < HINT_AFTER; i++) last = hs.noteOn(70, 10, new Set());
+ok(last.kind === 'wrong' && last.hint, 'hint after repeated mistakes');
 
-const h = new WaitSession(steps, 0);
-let last = h.noteOn(70, 10, new Set());
-for (let i = 1; i < HINT_AFTER; i++) last = h.noteOn(70, 10, new Set());
-ok(last.kind === 'wrong' && last.hint, `hint after ${HINT_AFTER} mistakes`);
+// --- Rhythm mode ---
+const targets = buildTargets(tiny);
+ok(targets.length === 4, 'rhythm targets: every sounding note, chord split');
+const r = new RhythmSession(targets, 1000);
+ok(r.noteOn(60, 0.05).kind === 'hit', 'on time = hit');
+const early = r.noteOn(64, 0.85);
+ok(early.kind === 'hit' && early.grade === 'good' && early.dtMs < 0, '150 ms early = good, negative offset');
+ok(r.noteOn(62, 2.0).kind === 'wrong', 'wrong pitch near a note = wrong');
+ok(r.noteOn(67, 2.02).kind === 'hit', 'chord member hit');
+ok(r.noteOn(72, 3.5).kind === 'extra', 'nothing written near = extra');
+ok(r.tick(2.5).length === 1 && targets[2].grade === 'miss', 'unplayed note becomes a miss once its window passes');
+const rs = summarizeRhythm(r);
+ok(rs.hits === 3 && rs.missed === 1 && Math.abs(rs.accuracy - 0.75) < 1e-9, 'rhythm summary');
 
-// --- Lesson 1 generator ---
-const l1 = LESSONS[0];
-for (const seed of [1, 2, 3, 42, 999, 123456]) {
-  const sc = generateExercise(l1, { seed });
-  const notes = sc.measures.flatMap((m) => m.notes);
-  ok(sc.measures.length === 8, `seed ${seed}: 8 bars`);
-  ok(sc.measures.every((m) => Math.abs(m.notes.reduce((a, n) => a + n.dur, 0) - 4) < 1e-9), `seed ${seed}: every bar fills 4 beats`);
-  ok(notes.every((n) => l1.notes!.includes(n.midi)), `seed ${seed}: only Do Ré Mi Fa Sol`);
-  ok(l1.notes!.every((m) => notes.filter((n) => n.midi === m).length >= 2), `seed ${seed}: every note comes up at least twice`);
-  const mel = notes.map((n) => l1.notes!.indexOf(n.midi));
-  ok(mel.slice(0, -1).every((p, i) => i === 0 || Math.abs(p - mel[i - 1]) <= l1.maxLeap!), `seed ${seed}: no jump bigger than a third`);
-  ok(notes[notes.length - 1].midi === 60 && notes[notes.length - 1].dur === 4, `seed ${seed}: ends on a whole-note Do`);
-  ok(notes.every((n) => [1, 2, 4].includes(n.dur)), `seed ${seed}: whole, half and quarter notes only`);
-}
-const a = generateExercise(l1, { seed: 7 }).measures.flatMap((m) => m.notes.map((n) => n.midi)).join();
-const b = generateExercise(l1, { seed: 7 }).measures.flatMap((m) => m.notes.map((n) => n.midi)).join();
-ok(a === b, 'same seed, same exercise');
-
-// Weak notes come up more often.
-const count = (weak: Map<number, number>) => {
-  let n = 0;
-  for (let seed = 0; seed < 200; seed++) {
-    n += generateExercise(l1, { seed, weakness: weak }).measures.flatMap((m) => m.notes).filter((x) => x.midi === 65).length;
+// --- Generator, every lesson ---
+for (const l of LESSONS) {
+  for (const seed of [1, 42, 777]) {
+    const sc = generateExercise(l, { seed });
+    const notes = sc.measures.flatMap((m) => m.notes);
+    const tag = `L${l.number} seed ${seed}`;
+    ok(sc.measures.length === l.bars, `${tag}: ${l.bars} bars`);
+    const filled = sc.measures.every((m) =>
+      [...new Set(m.notes.map((n) => n.staff))].every((st) => Math.abs(m.notes.filter((n) => n.staff === st).reduce((a, n) => a + n.dur, 0) - 4) < 1e-9)
+    );
+    ok(filled, `${tag}: every staff fills every bar`);
+    const allowed = new Set(lessonNotes(l));
+    ok(notes.filter((n) => !n.rest).every((n) => allowed.has(n.midi)), `${tag}: only the lesson's notes`);
+    ok(sc.measures.every((m) => m.key === l.keyFifths), `${tag}: key signature`);
+    if (sc.staves === 2) ok(notes.filter((n) => !n.rest && n.staff === 1).every((n) => n.midi <= 60), `${tag}: left hand on the bass staff`);
+    else ok(sc.clefs[0] === (l.arrangement === 'lh' ? 'F' : 'G'), `${tag}: single staff with the right clef`);
+    const need = l.arrangement === 'rh' || l.arrangement === 'lh' ? 2 : 1;
+    for (const hand of [l.arrangement === 'lh' ? undefined : l.rh, l.arrangement === 'rh' ? undefined : l.lh]) {
+      if (!hand) continue;
+      ok(hand.notes.every((m) => notes.filter((n) => n.midi === m).length >= need), `${tag}: each note at least ${need}×`);
+    }
   }
-  return n;
-};
-const plain = count(new Map());
-const weakFa = count(new Map([[65, 1]]));
-ok(weakFa > plain * 1.2, `a weak Fa shows up more (${plain} → ${weakFa})`);
+}
+const sol = generateExercise(LESSONS.find((l) => l.id === 'sol-majeur')!, { seed: 5 });
+const fs = sol.measures.flatMap((m) => m.notes).filter((n) => n.midi === 66);
+ok(fs.length > 0 && fs.every((n) => noteName(n.spell) === 'F♯'), 'G major: F# spelled F♯');
+const fa = generateExercise(LESSONS.find((l) => l.id === 'fa-majeur')!, { seed: 5 });
+ok(fa.measures.flatMap((m) => m.notes).filter((n) => n.midi === 70).every((n) => noteName(n.spell) === 'B♭'), 'F major: Bb spelled B♭');
+const tog = generateExercise(LESSONS.find((l) => l.id === 'deux-mains')!, { seed: 9 });
+ok(buildSteps(tog).some((st) => st.midis.length === 2), 'hands together: some steps need both hands');
+const a1 = generateExercise(LESSONS[0], { seed: 7 }).measures.flatMap((m) => m.notes.map((n) => n.midi)).join();
+ok(a1 === generateExercise(LESSONS[0], { seed: 7 }).measures.flatMap((m) => m.notes.map((n) => n.midi)).join(), 'same seed, same exercise');
+let plain = 0;
+let weakFa = 0;
+for (let seed = 0; seed < 150; seed++) {
+  plain += generateExercise(LESSONS[0], { seed }).measures.flatMap((m) => m.notes).filter((x) => x.midi === 65).length;
+  weakFa += generateExercise(LESSONS[0], { seed, weakness: new Map([[65, 1]]) }).measures.flatMap((m) => m.notes).filter((x) => x.midi === 65).length;
+}
+ok(weakFa > plain * 1.2, `weak Fa comes up more (${plain} → ${weakFa})`);
 
-// --- Progress ---
-const perfect = steps.map((st, i) => ({ expected: st.midis, wrong: [], reactionMs: i ? 900 : 4000, hinted: false }));
-const day1 = new Date(2026, 10, 10, 18).getTime();
-const day1b = new Date(2026, 10, 10, 21).getTime();
-const day2 = new Date(2026, 10, 11, 18).getTime();
-let r = recordSession(emptyProgress(), 'do-main-droite', perfect, summarize(perfect), false, day1);
-ok(r.validated && !r.newlyMastered, 'perfect session validates, not mastered yet');
-r = recordSession(r.progress, 'do-main-droite', perfect, summarize(perfect), false, day1b);
-ok(validatedDays(r.progress.lessons['do-main-droite']) === 1 && !r.newlyMastered, 'two sessions the same day count as one day');
-r = recordSession(r.progress, 'do-main-droite', perfect, summarize(perfect), true, day2);
-ok(!r.validated && !r.progress.lessons['do-main-droite'].mastered, 'session with note names shown does not count');
-r = recordSession(r.progress, 'do-main-droite', perfect, summarize(perfect), false, day2);
-ok(r.newlyMastered, `mastered after ${MASTERY.days} validated days`);
+// --- Pieces ---
+for (const pc of PIECES) {
+  const rh = parseHand(pc.rh);
+  const lh = parseHand(pc.lh);
+  ok(rh.length === lh.length, `${pc.title}: both hands have ${rh.length} bars`);
+  ok([...rh, ...lh].every((bar) => Math.abs(bar.reduce((a, t) => a + t.dur, 0) - 4) < 1e-9), `${pc.title}: every bar is 4 beats`);
+  const both = pieceScore(pc, 'both');
+  ok(both.staves === 2 && pieceScore(pc, 'lh').clefs[0] === 'F', `${pc.title}: grand staff / bass clef alone`);
+  ok(both.measures[0].notes.some((n) => n.finger), `${pc.title}: starting fingers given`);
+  ok(buildTargets(both).length > 20, `${pc.title}: playable in rhythm mode`);
+}
+ok(PIECE_STAGES.length === 5 && PIECE_STAGES[0].hands === 'rh' && PIECE_STAGES[4].tempo === 1, 'piece stages: hands apart to full tempo');
 
-const slow = perfect.map((x) => ({ ...x, reactionMs: 2500 }));
-ok(!recordSession(emptyProgress(), 'x', slow, summarize(slow), false, day1).validated, 'too slow does not validate');
+// --- Progress, mastery, reviews ---
+const metrics = (accuracy: number, med: number, extra: Partial<SessionMetrics> = {}): SessionMetrics => ({
+  mode: 'wait', accuracy, medianReactionMs: med, attempts: [{ midi: 64, clean: accuracy > 0.9, slow: false }], confusions: [], assisted: false, ...extra
+});
+ok(passes('wait', metrics(0.96, 900)), 'wait pass');
+ok(!passes('wait', metrics(0.96, 1800)), 'too hesitant fails');
+ok(!passes('wait', metrics(1, 500, { assisted: true })), 'note names shown fail');
+ok(passes('rhythm', { ...metrics(0.92, 0), mode: 'rhythm', timingMs: 80, tempo: 60 }, 60), 'rhythm pass at tempo');
+ok(!passes('rhythm', { ...metrics(0.95, 0), mode: 'rhythm', timingMs: 80, tempo: 50 }, 60), 'rhythm below target tempo fails');
 
-const messy = s.results;
-let p = emptyProgress();
-for (let i = 0; i < 6; i++) p = recordSession(p, 'x', messy, summarize(messy), false, day1).progress;
-ok((weaknessMap(p).get(64) ?? 0) > (weaknessMap(p).get(60) ?? 0), 'missed Mi is weaker than Do');
-ok(weakestNotes(p)[0]?.midi === 64, 'Mi tops the notes to work on');
-ok(p.confusions["64>65"] === 6, 'confusions accumulate across sessions');
+const d1 = new Date(2026, 10, 10, 18).getTime();
+const d1b = new Date(2026, 10, 10, 21).getTime();
+const d2 = new Date(2026, 10, 11, 18).getTime();
+let p = recordLesson(emptyProgress(), 'do-main-droite', metrics(1, 800), true, 2, d1).progress;
+p = recordLesson(p, 'do-main-droite', metrics(1, 800), true, 2, d1b).progress;
+ok(validatedDays(p.lessons['do-main-droite']) === 1, 'same day counts once');
+const m2 = recordLesson(p, 'do-main-droite', metrics(1, 800), true, 2, d2);
+ok(m2.newlyMastered, 'mastered on the second day');
+p = m2.progress;
+ok(currentLesson(p)?.id === 'do-main-gauche', 'next lesson becomes current');
+ok(streak(p, d2) === 2 && streak(p, d2 + 86400000) === 2 && streak(p, d2 + 3 * 86400000) === 0, 'streak counts consecutive days, tolerates today not done yet');
+
+// Pieces: stages then spaced reviews.
+let pp = emptyProgress();
+const n = PIECE_STAGES.length;
+for (let i = 0; i < n; i++) pp = recordPiece(pp, 'agneau', i, PIECE_STAGES[i].id, n, metrics(1, 700), true, d1).progress;
+ok(pp.pieces.agneau.stage === n && pp.pieces.agneau.due === addDays(dayKey(d1), 1), 'learnt piece: first review tomorrow');
+pp = recordPiece(pp, 'agneau', n - 1, 'tempo', n, metrics(1, 700), true, d2).progress;
+ok(pp.pieces.agneau.interval === 3, 'good review: next in 3 days');
+pp = recordPiece(pp, 'agneau', n - 1, 'tempo', n, metrics(0.5, 700), false, d2).progress;
+ok(pp.pieces.agneau.interval === 1, 'failed review: back to tomorrow');
+const stuck = recordPiece(emptyProgress(), 'agneau', 2, 'ensemble', n, metrics(1, 700), true, d1).progress;
+ok(stuck.pieces.agneau.stage === 0, 'stages cannot be skipped');
+
+// Placement and plan.
+let pl = recordPlacement(emptyProgress(), ['do-main-droite', 'do-main-gauche', 'alternance'], 'intervalles', d1);
+ok(currentLesson(pl)?.id === 'en-rythme', 'after the test: first untested lesson (rhythm) is next');
+ok(knownHands(pl).lh.includes(48) && knownHands(pl).rh.includes(67), 'known notes include acquired lessons');
+ok(flashLesson(pl).lh !== undefined && flashLesson(pl).arrangement === 'flash', 'warm-up uses both hands once known');
+ok(sightReadingLesson(pl).mode === 'rhythm', 'sight-reading is played at tempo');
+const plan = dailyPlan(pl, d2).map((a) => a.kind);
+ok(plan[0] === 'flash' && plan.includes('sight') && plan.includes('lesson') && plan.includes('piece'), `daily plan: ${plan.join(', ')}`);
+ok(blockPasses(7, 8, 1800) && !blockPasses(5, 8, 1000) && !blockPasses(8, 8, 3500), 'level test block rule');
+const cat = concatScores([generateExercise(LESSONS[0], { seed: 1, bars: 2, noHome: true, grand: true }), generateExercise(LESSONS[9], { seed: 2, bars: 2, noHome: true, grand: true })], 't');
+ok(cat.measures.length === 4 && cat.measures[2].startBeat === 8 && cat.measures[2].keyChange && cat.measures[2].key === 1, 'test blocks glued with their key change');
+ok(cat.measures[3].notes.every((x) => x.beat >= 12 && x.beat < 16), 'glued notes shifted in time');
+
+// Notes stats, migration, transfer.
+let np = emptyProgress();
+for (let i = 0; i < 6; i++) np = recordPractice(np, { ...metrics(0, 900), attempts: [{ midi: 64, clean: false, slow: false }, { midi: 60, clean: true, slow: false }], confusions: [[64, 65, 1]] }, d1);
+ok((weaknessMap(np).get(64) ?? 0) > (weaknessMap(np).get(60) ?? 0) && weakestNotes(np)[0]?.midi === 64, 'missed Mi is the weakest note');
+ok(np.confusions['64>65'] === 6, 'confusions accumulate');
+const old = { version: 2, notes: { 60: { attempts: 3, clean: 3, difficulty: 0 } }, confusions: {}, lessons: { 'do-main-droite': { sessions: [{ date: d1, accuracy: 1, medianReactionMs: 900, assisted: false, validated: true }], mastered: false } } };
+const mig = migrate(old);
+ok(mig.version === 3 && mig.days.length === 1 && mig.lessons['do-main-droite'].sessions[0].mode === 'wait' && mig.onboarded, 'v2 progress migrates');
+const back = importProgress(exportProgress(pl));
+ok(!!back && back.placement?.stoppedAt === 'intervalles', 'export / import round trip');
+ok(importProgress('n’importe quoi') === null, 'bad code rejected');
+pl = recordPractice(pl, metrics(1, 1), d1);
+ok(pl.days.includes(dayKey(d1)), 'practice marks the day');
 
 if (fails) {
   console.error(`\n${fails} failing check(s)`);

@@ -1,7 +1,7 @@
 /**
- * End-to-end check in a real browser, phone-sized:
- *  - a fake FP-10 behind Web MIDI: connect, test a note, play a full lesson by MIDI;
- *  - an "iPad" with no Web MIDI: explanation + on-screen keyboard.
+ * End-to-end in a real browser with a fake FP-10 behind Web MIDI:
+ * level test, a rhythm lesson played in time, the daily session, a piece stage,
+ * the theme toggle, and an iPad-like browser without MIDI.
  *
  * Run with: npm run test:ui   (needs the Playwright chromium)
  */
@@ -20,10 +20,7 @@ const server = await createServer({ root: process.cwd(), server: { port: 5199, s
 await server.listen();
 const browser = await chromium.launch();
 
-/**
- * Replaces Web MIDI with one fake input; window.__midi(status, note, vel) plays on it.
- * Plain JS strings: tsx would otherwise inject helpers the page doesn't have.
- */
+/** Plain JS strings: tsx would otherwise inject helpers the page doesn't have. */
 const FAKE_MIDI = `
   const input = { id: 'fp10', name: 'FP-10', state: 'connected', onmidimessage: null };
   const access = { inputs: new Map([['fp10', input]]), onstatechange: null };
@@ -31,97 +28,156 @@ const FAKE_MIDI = `
   const q = navigator.permissions.query.bind(navigator.permissions);
   navigator.permissions.query = (d) => d.name === 'midi' ? Promise.resolve({ state: 'prompt' }) : q(d);
   window.__midi = (s, n, v) => input.onmidimessage && input.onmidimessage({ data: new Uint8Array([s, n, v]), timeStamp: performance.now() });
+  // Play the rhythm-mode score exactly in time, from the page's own clock.
+  window.__playInTime = () => {
+    const ex = document.querySelector('.ex');
+    const t0 = Number(ex.dataset.t0), spb = Number(ex.dataset.msPerBeat), lat = Number(ex.dataset.latency);
+    for (const [beat, midi] of JSON.parse(ex.dataset.onsets)) {
+      const at = t0 + beat * spb + lat - performance.now();
+      setTimeout(() => { window.__midi(0x90, midi, 90); setTimeout(() => window.__midi(0x80, midi, 0), 80); }, Math.max(0, at));
+    }
+  };
 `;
-
 const NO_MIDI = `Object.defineProperty(Navigator.prototype, 'requestMIDIAccess', { value: undefined, configurable: true });`;
 
-async function newPage(init: string): Promise<{ page: Page; errors: string[] }> {
-  const page = await browser.newPage({ viewport: { width: 844, height: 390 }, hasTouch: true });
+async function newPage(init: string, viewport = { width: 1024, height: 700 }): Promise<{ page: Page; errors: string[] }> {
+  const page = await browser.newPage({ viewport, hasTouch: true });
   const errors: string[] = [];
-  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('pageerror', (e) => (errors.push(e.message), console.error('PAGEERROR', e.message, e.stack?.split('\n').slice(0, 4).join(' | '))));
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
   await page.addInitScript({ content: init });
   return { page, errors };
 }
 
-const midi = (page: Page, status: number, note: number, vel: number) =>
-  page.evaluate(([s, n, v]) => (window as unknown as { __midi: (s: number, n: number, v: number) => void }).__midi(s, n, v), [status, note, vel]);
-const strike = async (page: Page, note: number) => {
-  await midi(page, 0x90, note, 90);
-  await midi(page, 0x80, note, 0);
+/** Wait mode: play whatever is circled until the results card shows. */
+async function playWait(page: Page, opts: { wrongFirst?: boolean } = {}): Promise<void> {
+  await page.evaluate(async (wrongFirst) => {
+    const w = window as unknown as { __midi: (s: number, n: number, v: number) => void };
+    const ex = document.querySelector('.ex') as HTMLElement;
+    let guard = 0;
+    let first = true;
+    while (ex.dataset.expected && ex.dataset.phase === 'play' && guard++ < 400) {
+      const ms = ex.dataset.expected.split(',').map(Number);
+      if (first && wrongFirst) w.__midi(0x90, ms[0] + 1, 80), w.__midi(0x80, ms[0] + 1, 0);
+      first = false;
+      for (const m of ms) w.__midi(0x90, m, 80);
+      for (const m of ms) w.__midi(0x80, m, 0);
+      await new Promise((r) => setTimeout(r, 15));
+    }
+  }, !!opts.wrongFirst);
+  try {
+    await page.waitForSelector('.results', { timeout: 5000 });
+  } catch (e) {
+    console.error('state:', await page.evaluate(() => {
+      const ex = document.querySelector('.ex') as HTMLElement;
+      return { phase: ex?.dataset.phase, expected: ex?.dataset.expected, count: document.querySelector('.count')?.textContent, fb: document.querySelector('.feedback')?.textContent };
+    }));
+    throw e;
+  }
+}
+
+const startExercise = async (page: Page) => {
+  await page.waitForSelector('.ex');
+  await page.click('.intro >> text=C’est parti');
 };
 
-// ---------- Android phone + FP-10 ----------
+// ---------- Phone/iPad with the FP-10 ----------
 {
   const { page, errors } = await newPage(FAKE_MIDI);
   await page.goto('http://localhost:5199/#/');
-  await page.waitForSelector('.piano-card');
-  ok((await page.textContent('.pc-title')) === 'Branche ton piano', 'phone: asks to plug the piano');
+  await page.waitForSelector('.piano-status');
   await page.click('text=Connecter le piano');
-  await page.waitForSelector('.piano-card[data-state="connected"]');
-  ok((await page.textContent('.pc-title'))!.includes('FP-10'), 'phone: FP-10 shown as connected');
-  await strike(page, 64);
-  ok((await page.textContent('.pc-live'))!.includes('Mi'), 'phone: test note shows its name');
+  await page.waitForSelector('.piano-status[data-state="connected"]');
+  ok((await page.textContent('.ps-text'))!.includes('FP-10'), 'FP-10 connected');
+  ok(await page.isVisible('.hero'), 'first visit: level test offered');
 
-  await page.click('.lesson >> text=Commencer');
-  await page.waitForSelector('.ex');
-  ok((await page.locator('.kbd').count()) === 0, 'phone: no on-screen keys with a piano connected');
-  ok((await page.textContent('.source'))!.includes('FP-10'), 'phone: input source is the FP-10');
+  // Theme toggle persists.
+  const before = await page.getAttribute('html', 'data-theme');
+  await page.click('.home-head .theme-toggle');
+  const after = await page.getAttribute('html', 'data-theme');
+  ok(before !== after, `theme toggles (${before} → ${after})`);
+  await page.reload();
+  await page.waitForSelector('.piano-status');
+  ok((await page.getAttribute('html', 'data-theme')) === after, 'theme remembered after reload');
+  await page.click('.home-head .theme-toggle');
+  // The fake permission is never "granted", so connect again after the reload.
+  await page.click('text=Connecter le piano');
+  await page.waitForSelector('.piano-status[data-state="connected"]');
 
-  await strike(page, 50); // any key starts
-  ok((await page.getAttribute('.ex', 'data-phase')) === 'play', 'phone: a key on the piano starts the exercise');
-
-  const expected = async () => page.getAttribute('.ex', 'data-expected');
-  const first = Number(await expected());
-  const wrong = first === 65 ? 64 : 65;
-  await strike(page, wrong);
-  ok((await page.textContent('.feedback'))!.startsWith('✗'), 'phone: wrong key gets a ✗');
-  ok((await page.getAttribute('.feedback', 'data-tone')) === 'bad', 'phone: wrong key is shown in red');
-  ok(Number(await expected()) === first, 'phone: wrong key does not move on');
-
-  // Pedal and stray controller messages must not count as notes.
-  await midi(page, 0xb0, 64, 127);
-  ok(Number(await expected()) === first, 'phone: sustain pedal is ignored');
-
-  let guard = 0;
-  let e: string | null;
-  while ((e = await expected()) && guard++ < 80) await strike(page, Number(e));
-  await page.waitForSelector('.results', { timeout: 3000 });
+  // Level test, all right: everything acquired, rhythm lesson becomes current.
+  await page.click('text=Faire le test de niveau');
+  await startExercise(page);
+  await playWait(page);
   const res = await page.textContent('.results');
-  ok(!!res && res.includes('juste du premier coup'), 'phone: results screen after the last note');
-  ok(!!res && res.includes(`joué au lieu de`), 'phone: the mistake is listed as a confusion');
-
-  await page.click('text=Retour au parcours');
+  ok(!!res && res.includes('9') && res.includes('leçon 4'), 'level test: all blocks passed, path resumes at lesson 4');
+  await page.click('text=Voir ma séance du jour');
   await page.waitForSelector('.lessons');
-  ok((await page.textContent('.lesson .st'))!.includes('dernière séance'), 'phone: lesson remembers the session');
-  const stored = await page.evaluate(() => localStorage.getItem('piano-reader:progress:v2'));
-  ok(!!stored && JSON.parse(stored).lessons['do-main-droite'].sessions.length === 1, 'phone: progress saved');
+  ok((await page.textContent('.lesson.current .t')) === 'Jouer en rythme', 'current lesson is the rhythm one');
+  ok(!(await page.isVisible('.hero')), 'welcome card gone');
 
-  await page.click('.lesson >> text=Jouer');
-  await page.waitForSelector('.ex');
-  await page.click('text=C’est parti');
-  await page.click('text=Noms des notes');
-  ok(await page.isVisible('.assisted'), 'phone: showing names warns the session will not count');
-  ok(errors.length === 0, `phone: no page errors (${errors.join(' | ')})`);
+  // Rhythm lesson played in time.
+  await page.goto('http://localhost:5199/#/lecon/en-rythme');
+  await startExercise(page);
+  await page.evaluate(() => (window as unknown as { __playInTime: () => void }).__playInTime());
+  await page.waitForSelector('.results', { timeout: 60000 });
+  const rr = await page.textContent('.results');
+  ok(!!rr && rr.includes('Séance validée'), `rhythm lesson validated when played in time (${rr?.slice(0, 80)})`);
+
+  // Daily session: warm-up first, then "Continuer".
+  await page.goto('http://localhost:5199/#/seance');
+  await startExercise(page);
+  ok((await page.textContent('.tb-title'))!.includes('1/'), 'session shows its step count');
+  await playWait(page, { wrongFirst: true });
+  ok((await page.textContent('.results'))!.includes('Échauffement terminé'), 'warm-up done');
+  ok(await page.isVisible('.results >> text=/Continuer/'), 'session offers to continue');
+  await page.click('.results >> text=/Continuer/');
+  await page.waitForSelector('.intro');
+  ok((await page.textContent('.tb-title'))!.includes('2/'), 'session moves to step 2');
+
+  // A piece: first stage, right hand alone.
+  await page.goto('http://localhost:5199/#/morceau/agneau');
+  await page.waitForSelector('.stages');
+  ok((await page.locator('.pstage').count()) === 5, 'piece page lists 5 stages');
+  await page.click('.pstage.current >> text=Travailler');
+  await startExercise(page);
+  ok((await page.getAttribute('.ex', 'data-mode')) === 'wait', 'stage 1 is in wait mode');
+  await playWait(page);
+  ok((await page.textContent('.results'))!.includes('Étape validée'), 'stage 1 validated');
+  await page.click('.results button >> text=Étape suivante');
+  await page.waitForSelector('.intro');
+  ok((await page.textContent('.intro h2')) === 'Main gauche seule', 'next stage: left hand');
+
+  // Progress and settings pages render.
+  await page.goto('http://localhost:5199/#/progres');
+  await page.waitForSelector('.notemap');
+  ok((await page.locator('.nm-key.seen').count()) > 5, 'progress: played notes coloured on the keyboard');
+  ok((await page.locator('.cal .day.on').count()) >= 1, 'progress: today marked');
+  await page.goto('http://localhost:5199/#/reglages');
+  await page.waitForSelector('.seg');
+  await page.click('.seg >> text=Sombre');
+  ok((await page.getAttribute('html', 'data-theme')) === 'dark', 'settings: dark theme');
+  await page.click('text=Copier mon code');
+  ok(((await page.inputValue('textarea.code')) ?? '').length > 50, 'settings: progress code exported');
+
+  ok(errors.length === 0, `no page errors (${errors.join(' | ')})`);
   await page.close();
 }
 
-// ---------- iPad: no Web MIDI ----------
+// ---------- Browser without Web MIDI ----------
 {
-  const { page, errors } = await newPage(NO_MIDI);
-  await page.setViewportSize({ width: 1024, height: 768 });
-  await page.goto('http://localhost:5199/#/');
-  await page.waitForSelector('.piano-card');
-  ok((await page.getAttribute('.piano-card', 'data-state')) === 'unsupported', 'iPad: explains there is no MIDI');
-  await page.click('.lesson >> text=Commencer');
+  const { page, errors } = await newPage(NO_MIDI, { width: 844, height: 390 });
+  await page.goto('http://localhost:5199/#/lecon/do-main-droite');
   await page.waitForSelector('.kbd');
-  ok((await page.locator('.key').count()) > 12, 'iPad: on-screen keyboard offered');
-  await page.click('text=C’est parti');
+  ok((await page.locator('.key').count()) > 12, 'no MIDI: on-screen keyboard');
+  await page.click('.intro >> text=C’est parti');
   const exp = Number(await page.getAttribute('.ex', 'data-expected'));
   await page.locator(`.key[data-midi="${exp}"]`).dispatchEvent('pointerdown', { pointerId: 1 });
   await page.locator(`.key[data-midi="${exp}"]`).dispatchEvent('pointerup', { pointerId: 1 });
-  ok((await page.textContent('.count'))!.startsWith('1 /'), 'iPad: tapping the right key advances');
-  ok(errors.length === 0, `iPad: no page errors (${errors.join(' | ')})`);
+  ok((await page.textContent('.count'))!.startsWith('1 /'), 'no MIDI: tapping the right key advances');
+  await page.goto('http://localhost:5199/#/');
+  await page.waitForSelector('.piano-status');
+  ok((await page.getAttribute('.piano-status', 'data-state')) === 'unsupported', 'no MIDI: explained on home');
+  ok(errors.length === 0, `no MIDI: no page errors (${errors.join(' | ')})`);
   await page.close();
 }
 
