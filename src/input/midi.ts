@@ -48,6 +48,18 @@ export class MidiManager {
 
   constructor(private bus: NoteBus) {
     this.status = requestFn() ? { state: 'idle' } : { state: 'unsupported' };
+    // iPad "Web MIDI" browsers (MIDIWeb Browser…) may inject the API after the
+    // page scripts run: look again a few times before giving up.
+    if (this.status.state === 'unsupported' && typeof window !== 'undefined') {
+      let tries = 0;
+      const timer = window.setInterval(() => {
+        if (requestFn()) {
+          window.clearInterval(timer);
+          this.set({ state: 'idle' });
+          void this.restore();
+        } else if (++tries >= 10) window.clearInterval(timer);
+      }, 300);
+    }
   }
 
   onChange(fn: (s: MidiStatus) => void): () => void {
