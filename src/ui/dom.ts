@@ -100,15 +100,29 @@ export function resultCard(o: { title: string; stats: StatLine[]; notes?: string
   return card;
 }
 
-/** Top bar used by every inner screen. */
-export function topBar(app: App, title: string, onBack: () => void, extra?: HTMLElement): HTMLElement {
-  // Buttons sit on the right: the top-left corner is where full-screen
-  // browsers on iPad put their own "exit full screen" button.
+/**
+ * Navigation buttons live at the bottom of the screen: in full screen, the
+ * iPad browser keeps a strip at the top that swallows taps.
+ */
+export function navDock(...buttons: HTMLElement[]): HTMLElement {
+  const dock = h('nav', 'navdock');
+  dock.setAttribute('aria-label', 'Navigation');
+  dock.append(...buttons);
+  return dock;
+}
+
+/**
+ * Title bar of an inner screen (no buttons up there), plus Retour and the
+ * theme toggle: floating bottom-right, or inside `dockInto` when given
+ * (the exercise screen puts them in its bottom toolbar).
+ */
+export function topBar(app: App, title: string, onBack: () => void, extra?: HTMLElement, dockInto?: HTMLElement): HTMLElement {
   const bar = h('header', 'topbar');
-  const back = button('Retour', 'btn back', onBack);
-  back.setAttribute('aria-label', 'Retour');
   bar.append(h('div', 'tb-title', title));
   if (extra) bar.append(extra);
-  bar.append(themeButton(app), back);
+  const back = button('Retour', 'btn back', onBack);
+  back.setAttribute('aria-label', 'Retour');
+  if (dockInto) dockInto.append(themeButton(app), back);
+  else bar.append(navDock(themeButton(app), back));
   return bar;
 }

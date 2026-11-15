@@ -159,6 +159,7 @@ button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent);
 
 /* ---------- Exercise ---------- */
 .ex { height: 100%; display: flex; flex-direction: column; position: relative; }
+.ex-body { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .stage { flex: 1; min-height: 140px; position: relative; contain: strict; overflow: hidden; background: var(--paper); }
 /* The score strip slides under a fixed overlay (cursor, pinned clefs). */
 .strip { position: absolute; left: 0; top: 0; width: 1px; will-change: transform; }
@@ -270,3 +271,18 @@ button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent);
 .glossary dt .en { color: var(--accent-deep); font-style: italic; }
 .glossary dt .arrow { color: var(--muted); }
 .glossary dd { margin: 2px 0 0; color: var(--muted); line-height: 1.45; font-size: 0.93rem; }
+
+/* ---------- Bottom navigation ---------- */
+.navdock {
+  position: fixed; z-index: 30; display: flex; gap: 8px;
+  right: max(14px, env(safe-area-inset-right));
+  bottom: max(14px, env(safe-area-inset-bottom));
+  padding: 6px; border-radius: 14px;
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  border: 1px solid var(--line); box-shadow: var(--shadow);
+}
+.navdock .btn { min-height: 44px; }
+.page { padding-bottom: 110px; }
+.nav-slot { display: flex; gap: 8px; }
+.nav-slot:empty { display: none; }
+.tools .nav-slot .btn { min-height: 40px; }

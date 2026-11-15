@@ -93,13 +93,13 @@ const startExercise = async (page: Page) => {
 
   // Theme toggle persists.
   const before = await page.getAttribute('html', 'data-theme');
-  await page.click('.home-head .theme-toggle');
+  await page.click('.navdock .theme-toggle');
   const after = await page.getAttribute('html', 'data-theme');
   ok(before !== after, `theme toggles (${before} → ${after})`);
   await page.reload();
   await page.waitForSelector('.piano-status');
   ok((await page.getAttribute('html', 'data-theme')) === after, 'theme remembered after reload');
-  await page.click('.home-head .theme-toggle');
+  await page.click('.navdock .theme-toggle');
   // The fake permission is never "granted", so connect again after the reload.
   await page.click('text=Connecter le piano');
   await page.waitForSelector('.piano-status[data-state="connected"]');

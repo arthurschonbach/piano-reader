@@ -5,7 +5,7 @@ import { pieceRow } from './library';
 import type { MidiStatus } from '../input/midi';
 import { practisedToday, streak, validatedDays, weakestNotes } from '../progress/store';
 import type { App } from './app';
-import { button, h, percent, themeButton } from './dom';
+import { button, h, navDock, percent, themeButton } from './dom';
 import { nameOf } from './player';
 
 function pianoStatus(app: App, s: MidiStatus, el: HTMLElement): void {
@@ -43,11 +43,11 @@ export function renderHome(root: HTMLElement, app: App): () => void {
   const head = h('header', 'home-head');
   const titles = h('div');
   titles.append(h('h1', 'title', 'Piano Reader'), h('p', 'sub', 'Ton coach de piano, à ton rythme.'));
-  const headBtns = h('div', 'head-btns');
   const gear = button('⚙︎', 'btn icon', () => app.go('#/reglages'));
   gear.setAttribute('aria-label', 'Réglages');
-  headBtns.append(themeButton(app), gear);
-  head.append(titles, headBtns);
+  head.append(titles);
+  // Bottom-right: the top of the screen doesn't take taps in full screen.
+  page.append(navDock(themeButton(app), gear));
   page.append(head);
 
   const status = h('div', 'piano-status');

@@ -91,7 +91,9 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
   view.dataset.phase = 'intro';
   view.dataset.mode = mode;
   const count = h('div', 'count');
-  view.append(topBar(app, cfg.title, cfg.onExit, count));
+  // Retour and the theme toggle go in the bottom toolbar (see navSlot below).
+  const navSlot = h('span', 'nav-slot');
+  view.append(topBar(app, cfg.title, cfg.onExit, count, navSlot));
   const stage = h('div', 'stage');
   const feedback = h('div', 'feedback');
   feedback.setAttribute('aria-live', 'polite');
@@ -117,16 +119,20 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     tools.append(metroBtn, button('Recommencer', 'btn', () => restart()));
   }
   const source = h('span', 'source');
-  tools.append(source, h('span', 'portrait-hint', 'Astuce : tourne l’écran en paysage.'));
+  tools.append(source, navSlot, h('span', 'portrait-hint', 'Astuce : tourne l’écran en paysage.'));
   const kbdSlot = h('div', 'kbd-slot');
-  view.append(stage, feedback, tools, kbdSlot);
+  // The intro/results card covers only the score area, so the toolbar
+  // (with Retour) and the on-screen keys stay usable underneath.
+  const body = h('div', 'ex-body');
+  body.append(stage, feedback);
+  view.append(body, tools, kbdSlot);
 
   // ---------- intro ----------
   const overlay = h('div', 'overlay');
   const show = (card: HTMLElement) => {
     overlay.innerHTML = '';
     overlay.append(card);
-    if (!overlay.isConnected) view.append(overlay);
+    if (!overlay.isConnected) body.append(overlay);
   };
   const introCard = () => {
     const card = h('div', 'card intro');
