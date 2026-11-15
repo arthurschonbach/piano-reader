@@ -3,3 +3,4 @@ dist/
 .vercel/
 *.log
 .DS_Store
+tests/out-*.png

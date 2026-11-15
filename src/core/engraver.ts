@@ -1,5 +1,5 @@
 import { CanvasContext, Glyph } from 'vexflow';
-import { measureAt, totalBeats, type Measure, type NoteItem, type Score } from './model';
+import { frenchName, measureAt, totalBeats, type Measure, type NoteItem, type Score } from './model';
 
 const K = 0.001036;
 export const HAND = ['#201b13', '#201b13'];
@@ -10,6 +10,15 @@ const REST_PLAYED = '#e2dccd';
 const STAFF = '#ddd5c4';
 const BAR = '#a89e8c';
 const ACCENT = '#d9481c';
+const MARK_COLOR: Record<Mark, string> = {
+  current: INK,
+  ok: '#2e8b57',
+  late: '#d98a1c',
+  bad: '#d32f2f'
+};
+
+/** Wait-mode feedback per note: to play now, right first time, right after mistakes, wrong key just pressed. */
+export type Mark = 'current' | 'ok' | 'late' | 'bad';
 
 const SHARP_STEPS = [3, 0, 4, 1, 5, 2, 6];
 const FLAT_STEPS = [6, 2, 5, 1, 4, 0, 3];
@@ -72,6 +81,7 @@ interface Cluster {
   dur: number;
   end: number;
   state: number;
+  mark?: Mark;
 }
 
 export interface DrawState {
@@ -79,6 +89,15 @@ export interface DrawState {
   lookahead: number;
   names: boolean;
   zoom: number;
+  /** Horizontal space per beat, in staff spaces (default 11). */
+  pxPerBeat?: number;
+  /** Cursor position as a fraction of the width (default 0.3). */
+  anchor?: number;
+  marks?: ReadonlyMap<NoteItem, Mark>;
+  /** Draw the vertical play-position line (default true). */
+  cursor?: boolean;
+  /** Notes whose name is shown even when `names` is off (hints). */
+  labels?: ReadonlySet<NoteItem>;
 }
 
 export interface ViewGeom {
@@ -105,12 +124,9 @@ function colorOf(state: number, hand: number, rest: boolean): string {
   return HAND[hand];
 }
 
-const STEPS = 'CDEFGAB';
-
-function noteName(n: NoteItem): string {
-  const s = n.spell;
-  const acc = s.alter === 1 ? '♯' : s.alter === -1 ? '♭' : s.alter === 2 ? '𝄪' : s.alter === -2 ? '𝄫' : '';
-  return `${STEPS[s.step]}${acc}${s.octave}`;
+function clusterColor(c: Cluster, staff: number): string {
+  if (c.mark && !c.rest) return MARK_COLOR[c.mark];
+  return colorOf(c.state, staff, c.rest);
 }
 
 function accGlyph(alter: number): string {
@@ -175,14 +191,17 @@ export class ScoreRenderer {
     ctx.fillRect(0, 0, w, h);
 
     const U = s.zoom;
-    let SP = 10 * U;
-    const maxSP = (h - 26) / 16.8;
-    if (SP > maxSP) SP = Math.max(4, maxSP);
-    const pxQ = 11 * SP;
-    const staffH = 4 * SP;
     const single = (score.staves ?? 2) < 2;
+    let SP = 10 * U;
+    // A lone staff still needs room for ledger lines and note names below it.
+    const maxSP = single ? (h - 20) / 11 : (h - 26) / 16.8;
+    if (SP > maxSP) SP = Math.max(4, maxSP);
+    // Narrow screens (phone in portrait): keep a few notes of look-ahead visible.
+    SP = Math.max(4, Math.min(SP, w / 26));
+    const pxQ = (s.pxPerBeat ?? 11) * SP;
+    const staffH = 4 * SP;
     const gap = 6.5 * SP;
-    const contentTotal = staffH * 2 + gap + (single ? 0 : 18);
+    const contentTotal = single ? staffH + 2 * SP : staffH * 2 + gap + 18;
     const trebleTop = Math.max(22, (h - contentTotal) / 2);
     const trebleBottom = trebleTop + staffH;
     const bassTop = trebleBottom + gap;
@@ -198,7 +217,7 @@ export class ScoreRenderer {
       return mw.clefW + mw.keyW + mw.timeW + 3 * SP;
     })() : 2 * SP;
 
-    const anchorX = w * 0.3;
+    const anchorX = w * (s.anchor ?? 0.3);
     this.lastView = { anchorX, lead, pxQ };
     const xOf = (b: number) => anchorX + lead + (b - s.beat) * pxQ;
 
@@ -230,23 +249,27 @@ export class ScoreRenderer {
     const measureClusters: Cluster[][] = [];
     const pad = 0.65 * SP;
     for (const i of visible) {
-      measureClusters.push(buildClusters(score.measures[i], xOf, s.beat, s.lookahead, pad));
+      const list = buildClusters(score.measures[i], xOf, s.beat, s.lookahead, pad);
+      if (s.marks) for (const c of list) c.mark = c.members.map((n) => s.marks!.get(n)).find((m) => m);
+      measureClusters.push(list);
     }
 
     for (let j = 0; j < visible.length; j++) {
       const m = score.measures[visible[j]];
       const bx = xOf(m.startBeat);
+      // Bar 1 opens the system: its line sits before the clef, not on the first note.
+      const lineX = m.number === 1 ? bx - lead : bx;
       ctx.strokeStyle = BAR;
       ctx.lineWidth = 1.2;
       ctx.beginPath();
-      ctx.moveTo(bx, trebleTop);
-      ctx.lineTo(bx, single ? trebleBottom : bassBottom);
+      ctx.moveTo(lineX, trebleTop);
+      ctx.lineTo(lineX, single ? trebleBottom : bassBottom);
       ctx.stroke();
       ctx.fillStyle = BAR;
       ctx.font = `${10 * U}px system-ui, sans-serif`;
       ctx.textAlign = 'left';
       ctx.fillText(String(m.number), bx + 4 * U, trebleTop - 6 * U);
-      this.drawMeasureHeader(score, m, bx, SP, staffTop, bottomIdx, yIdxFor, single);
+      this.drawMeasureHeader(score, m, m.number === 1 ? lineX : bx, SP, staffTop, bottomIdx, yIdxFor, single);
     }
     if (!score.infinite && score.measures.length) {
       const fx = xOf(totalBeats(score));
@@ -260,6 +283,20 @@ export class ScoreRenderer {
       ctx.stroke();
       ctx.fillStyle = INK;
       ctx.fillRect(fx + 1.6 * U, trebleTop, 3.4 * U, (single ? trebleBottom : bassBottom) - trebleTop);
+    }
+
+    const headW0 = gbox('noteheadBlack', 4 * SP).w;
+    for (const list of measureClusters) {
+      for (const c of list) {
+        if (c.mark !== 'current' && c.mark !== 'bad') continue;
+        const yIdx = yIdxFor(c.staff);
+        ctx.fillStyle = c.mark === 'bad' ? 'rgba(211,47,47,0.16)' : 'rgba(217,72,28,0.13)';
+        for (const n of c.members) {
+          ctx.beginPath();
+          ctx.arc(c.x + headW0 / 2, yIdx(idxOf(n)), 1.5 * SP, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
     }
 
     const accStates = visible.map(() => [new Map<number, number>(), new Map<number, number>()]);
@@ -292,7 +329,7 @@ export class ScoreRenderer {
           const y1 = yIdx(idxOf(n)) + dir * 0.9 * SP;
           const x2 = xOf(n.tieTarget.beat) + pad - 0.18 * SP;
           const y2 = yIdx(idxOf(n.tieTarget)) + dir * 0.9 * SP;
-          ctx.strokeStyle = colorOf(c.state, st, false);
+          ctx.strokeStyle = clusterColor(c, st);
           ctx.lineWidth = 1.5;
           ctx.beginPath();
           ctx.moveTo(x1, y1);
@@ -302,7 +339,7 @@ export class ScoreRenderer {
       }
     }
 
-    if (s.names) {
+    if (s.names || s.labels?.size) {
       ctx.textAlign = 'center';
       ctx.font = `600 ${Math.max(9, 1.1 * SP)}px system-ui, sans-serif`;
       ctx.lineWidth = 3.5;
@@ -310,15 +347,18 @@ export class ScoreRenderer {
       for (let j = 0; j < visible.length; j++) {
         for (const c of measureClusters[j]) {
           if (c.rest || c.grace) continue;
-          ctx.fillStyle = colorOf(c.state, c.staff, false);
+          if (!s.names && !c.members.some((n) => s.labels?.has(n))) continue;
+          ctx.fillStyle = clusterColor(c, c.staff);
           const nx = c.x + gbox('noteheadBlack', 4 * SP).w / 2;
-          const ny = staffBottom[c.staff] + 15;
-          ctx.strokeText(noteName(c.primary), nx, ny);
-          ctx.fillText(noteName(c.primary), nx, ny);
+          const ny = staffBottom[c.staff] + Math.max(15, 2.9 * SP);
+          const name = frenchName(c.primary.spell);
+          ctx.strokeText(name, nx, ny);
+          ctx.fillText(name, nx, ny);
         }
       }
     }
 
+    if (s.cursor === false) return;
     const px = xOf(s.beat);
     ctx.strokeStyle = ACCENT;
     ctx.lineWidth = 2;
@@ -366,7 +406,7 @@ export class ScoreRenderer {
     };
 
     if (isFirst) {
-      let x = bx + 1.4 * SP;
+      let x = bx + 1.0 * SP;
       for (let st = 0; st < staves; st++) {
         if (wantClef) {
           drawClef(st, x);
@@ -483,7 +523,7 @@ function drawStream(ctx: CanvasRenderingContext2D, list: Cluster[], e: StreamEnv
   for (const g of beamed) for (const c of g) inBeam.add(c);
 
   for (const c of list) {
-    const color = colorOf(c.state, st, c.rest);
+    const color = clusterColor(c, st);
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
 
@@ -592,7 +632,7 @@ function drawBeamGroup(ctx: CanvasRenderingContext2D, group: Cluster[], e: Strea
   });
   let bY = up ? Math.min(...tips) : Math.max(...tips);
   bY = Math.min(e.staffBottom[st] + 2.2 * SP, Math.max(e.staffTop[st] - 2.2 * SP, bY));
-  const color = colorOf(group[0].state, st, false);
+  const color = clusterColor(group[0], st);
   ctx.strokeStyle = color;
   ctx.fillStyle = color;
   ctx.lineWidth = 1.6;

@@ -138,3 +138,11 @@ export function computeTies(score: Score): void {
     }
   }
 }
+
+const FR = ['Do', 'Ré', 'Mi', 'Fa', 'Sol', 'La', 'Si'];
+
+/** French solfège name without octave: "Do", "Fa♯", "Si♭". */
+export function frenchName(s: Spelled): string {
+  const acc = s.alter === 1 ? '♯' : s.alter === -1 ? '♭' : s.alter === 2 ? '𝄪' : s.alter === -2 ? '𝄫' : '';
+  return `${FR[s.step]}${acc}`;
+}

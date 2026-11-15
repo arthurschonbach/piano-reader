@@ -9,8 +9,8 @@ export default defineConfig({
       manifest: {
         name: 'Piano Reader',
         short_name: 'PianoReader',
-        description: 'Play your sheet music and train sight-reading at your own tempo',
-        lang: 'en',
+        description: 'Ton assistant pour apprendre à lire et jouer du piano',
+        lang: 'fr',
         start_url: '/',
         display: 'standalone',
         orientation: 'any',
