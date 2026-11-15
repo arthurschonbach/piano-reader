@@ -15,7 +15,8 @@ import {
   recordDrill, recordEar, recordPractice, setPieceWeak, streak, validatedDays, weakestNotes, weaknessMap, type SessionMetrics
 } from '../src/progress/store';
 import { dynamicsByMeasure, noteName, makeNote, spellOfMidi, type Score } from '../src/core/model';
-import { summarizeTouch, type TouchNote } from '../src/exercise/touch';
+import { holdDeadline, summarizeTouch, type TouchNote } from '../src/exercise/touch';
+import { beatsText } from '../src/ui/player';
 
 let fails = 0;
 const ok = (cond: boolean, msg: string) => {
@@ -83,6 +84,10 @@ ok(r.noteOn(72, 3.5).kind === 'extra', 'nothing written near = extra');
 ok(r.tick(2.5).length === 1 && targets[2].grade === 'miss', 'unplayed note becomes a miss once its window passes');
 const rs = summarizeRhythm(r);
 ok(rs.hits === 3 && rs.missed === 1 && Math.abs(rs.accuracy - 0.75) < 1e-9, 'rhythm summary');
+
+// --- Hold deadline and how lengths are said ---
+ok(holdDeadline(0, 2, 1000) === 1.5 && Math.abs(holdDeadline(0, 0.5, 1000) - 0.35) < 1e-9, 'hold: a quarter of the length, at least 150 ms, may be cut');
+ok(beatsText(1.5) === '1 temps ½' && beatsText(2) === '2 temps' && beatsText(0.5) === '½ temps' && beatsText(0.74) === '¾ temps', 'hold: lengths in words');
 
 // --- Touch: key releases and velocity ---
 const rel = new RhythmSession(buildTargets(tiny), 1000);

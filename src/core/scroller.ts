@@ -131,6 +131,18 @@ export class ScrollStrip {
     }
   }
 
+  /** Redraw the tiles between two beats (a note's duration line). */
+  invalidateSpan(fromBeat: number, toBeat: number): void {
+    if (!this.geo) return;
+    const { lead, pxQ, SP } = this.geo;
+    const x0 = lead + fromBeat * pxQ - 4 * SP;
+    const x1 = lead + toBeat * pxQ + 4 * SP;
+    for (const t of this.tiles) {
+      const t0 = t.index * TILE_W;
+      if (x1 >= t0 && x0 <= t0 + TILE_W) t.dirty = true;
+    }
+  }
+
   private offset(beat: number): number {
     return this.geo ? this.geo.anchorX - beat * this.geo.pxQ : 0;
   }

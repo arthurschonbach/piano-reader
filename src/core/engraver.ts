@@ -168,7 +168,23 @@ export interface DrawState {
   fingers?: boolean;
   /** Notes whose name is shown even when `names` is off (hints). */
   labels?: ReadonlySet<NoteItem>;
+  /** How long each played note has been held (rhythm mode). */
+  holds?: ReadonlyMap<NoteItem, Hold>;
+  /** Faint line after each note of a beat or more, showing how long to hold it. */
+  durations?: boolean;
 }
+
+/**
+ * A note's hold, in beats from its written start. "holding": key still down;
+ * "ok": held long enough; "short": let go too early.
+ */
+export interface Hold {
+  held: number;
+  state: 'holding' | 'ok' | 'short';
+}
+
+/** Notes this long or longer (in beats) get a duration line. */
+export const HOLD_LINE_MIN = 1;
 
 export interface ViewGeom {
   anchorX: number;
@@ -429,7 +445,8 @@ export class ScoreRenderer {
         for (const v of voices) {
           drawStream(ctx, list.filter((c) => c.voice === v), {
             st, SP, staffTop, staffBottom, bottomIdx, yIdx: yIdxFor(st), midIdx: bottomIdx[st] + 8,
-            acc, fingers: s.fingers !== false, beamUnit, barStart: m.startBeat
+            acc, fingers: s.fingers !== false, beamUnit, barStart: m.startBeat,
+            noteX: (b: number) => xOf(b) + pad, holds: s.holds, durations: !!s.durations
           });
         }
       }
@@ -657,6 +674,10 @@ interface StreamEnv {
   midIdx: number;
   acc: Map<number, number>;
   fingers: boolean;
+  /** Screen x of a note head at a beat. */
+  noteX: (beat: number) => number;
+  holds?: ReadonlyMap<NoteItem, Hold>;
+  durations: boolean;
   /** Beams group notes within this many beats from the bar start (1, or 1.5 in 6/8). */
   beamUnit: number;
   barStart: number;
@@ -701,6 +722,9 @@ function drawStream(ctx: CanvasRenderingContext2D, list: Cluster[], e: StreamEnv
       const em = 4 * SP * (c.grace ? 0.72 : 1);
       const code = c.base >= 4 ? 'noteheadWhole' : c.base >= 2 ? 'noteheadHalf' : 'noteheadBlack';
       const hw = gbox(code, em).w;
+      if (!c.grace && !n.tieStop && n.tieEnd - n.beat >= HOLD_LINE_MIN - 1e-9) drawHoldLine(ctx, n, c.x + hw + (n.dots ? 1.2 : 0.35) * SP, y, e);
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
       for (let L = bIdx + 10; L <= idx; L += 2) drawLedger(ctx, c.x, yIdx(L), SP, hw);
       for (let L = bIdx - 2; L >= idx; L -= 2) drawLedger(ctx, c.x, yIdx(L), SP, hw);
       const gx = c.grace ? c.x - 1.4 * SP : c.x;
@@ -762,6 +786,47 @@ function drawStream(ctx: CanvasRenderingContext2D, list: Cluster[], e: StreamEnv
   }
 
   for (const g of beamed) drawBeamGroup(ctx, g, e);
+}
+
+/**
+ * The line after a note that shows how long to hold it: faint and dashed as a
+ * guide, filled while the key is down (amber, then green once long enough),
+ * and red for the part missing when the key was let go too early.
+ */
+function drawHoldLine(ctx: CanvasRenderingContext2D, n: NoteItem, x0: number, y: number, e: StreamEnv): void {
+  const hold = e.holds?.get(n);
+  if (!hold && !e.durations) return;
+  const { SP } = e;
+  const x1 = e.noteX(n.tieEnd) - 0.55 * SP;
+  if (x1 - x0 < 0.5 * SP) return;
+  const xh = hold ? Math.min(x1, Math.max(x0, e.noteX(n.beat + hold.held) - 0.2 * SP)) : x0;
+  ctx.save();
+  ctx.lineCap = 'round';
+  // What's left to hold (or the guide).
+  if (!hold || hold.state !== 'ok') {
+    const missed = hold?.state === 'short';
+    if (missed || e.durations) {
+      ctx.strokeStyle = missed ? P.bad : P.rest;
+      ctx.globalAlpha = missed ? 0.9 : 0.45;
+      ctx.lineWidth = missed ? 0.3 * SP : 0.22 * SP;
+      ctx.setLineDash(missed ? [] : [0.5 * SP, 0.5 * SP]);
+      ctx.beginPath();
+      ctx.moveTo(xh, y);
+      ctx.lineTo(x1, y);
+      ctx.stroke();
+    }
+  }
+  if (hold) {
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = hold.state === 'ok' ? P.good : P.late;
+    ctx.lineWidth = 0.45 * SP;
+    ctx.beginPath();
+    ctx.moveTo(x0, y);
+    ctx.lineTo(hold.state === 'ok' && hold.held >= n.tieEnd - n.beat - 1e-9 ? x1 : xh, y);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function drawRest(ctx: CanvasRenderingContext2D, c: Cluster, staffTopY: number, SP: number, color: string): void {

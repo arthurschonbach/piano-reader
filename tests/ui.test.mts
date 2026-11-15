@@ -40,6 +40,18 @@ const FAKE_MIDI = `
     }
   };
 `;
+// Same, but long notes (2 beats or more) are let go after a third of their length.
+const FAKE_EARLY = `
+  window.__playEarly = () => {
+    const ex = document.querySelector('.ex');
+    const t0 = Number(ex.dataset.t0), spb = Number(ex.dataset.msPerBeat), lat = Number(ex.dataset.latency);
+    for (const [beat, midi, len] of JSON.parse(ex.dataset.onsets)) {
+      const at = t0 + beat * spb + lat - performance.now();
+      const hold = len >= 2 ? len * spb / 3 : len * spb - 40;
+      setTimeout(() => { window.__midi(0x90, midi, 80); setTimeout(() => window.__midi(0x80, midi, 0), hold); }, Math.max(0, at));
+    }
+  };
+`;
 const NO_MIDI = `Object.defineProperty(Navigator.prototype, 'requestMIDIAccess', { value: undefined, configurable: true });`;
 
 async function newPage(init: string, viewport = { width: 1024, height: 700 }): Promise<{ page: Page; errors: string[] }> {
@@ -47,7 +59,7 @@ async function newPage(init: string, viewport = { width: 1024, height: 700 }): P
   const errors: string[] = [];
   page.on('pageerror', (e) => (errors.push(e.message), console.error('PAGEERROR', e.message, e.stack?.split('\n').slice(0, 4).join(' | '))));
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
-  await page.addInitScript({ content: init });
+  await page.addInitScript({ content: init + FAKE_EARLY });
   return { page, errors };
 }
 
@@ -168,6 +180,16 @@ const startExercise = async (page: Page) => {
   await page.waitForSelector('.results', { timeout: 60000 });
   const tr = await page.textContent('.results');
   ok(!!tr && tr.includes('Passage propre') && tr.includes('prochain essai à 54 bpm'), `technique: clean run raises the tempo (${tr?.slice(0, 200)})`);
+
+  // Let go of long notes too early: told right away, line shown, and in the results.
+  await page.goto('http://localhost:5199/#/lecon/en-rythme');
+  await startExercise(page);
+  await page.evaluate(() => (window as unknown as { __playEarly: () => void }).__playEarly());
+  await page.waitForFunction(() => document.querySelector('.feedback')?.textContent?.startsWith('Lâchée trop tôt'), null, { timeout: 30000 });
+  ok(true, `hold: early release told while playing (${await page.textContent('.feedback')})`);
+  await page.waitForSelector('.results', { timeout: 60000 });
+  const er2 = await page.textContent('.results');
+  ok(!!er2 && er2.includes('Notes lâchées trop tôt'), 'hold: early releases listed in the results');
 
   // Advanced rhythm: tied notes held across the barline, and 6/8, played in time.
   for (const id of ['liaisons', 'six-huit']) {

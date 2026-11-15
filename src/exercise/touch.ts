@@ -46,6 +46,11 @@ export const HOLD_SLACK = { share: 0.25, minMs: 150 };
 /** A gap shorter than this between two notes still sounds legato. */
 export const LEGATO_GAP_MS = 80;
 
+/** The beat a note must be held to (its written end, minus the allowed slack). */
+export function holdDeadline(start: number, end: number, msPerBeat: number): number {
+  return end - Math.max(HOLD_SLACK.share * (end - start), HOLD_SLACK.minMs / msPerBeat);
+}
+
 const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
 
 export function summarizeTouch(notes: TouchNote[], opts: { msPerBeat?: number; melodyStaff?: number } = {}): TouchSummary {
