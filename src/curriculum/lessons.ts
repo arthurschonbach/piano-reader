@@ -67,6 +67,14 @@ export interface Lesson {
   touch?: TouchReq;
   /** Look-ahead: beats hidden in front of the cursor. */
   mask?: number;
+  /** Time signature (default 4/4). Rhythms are in quarter-note beats either way. */
+  time?: [number, number];
+}
+
+/** Bar length in quarter-note beats: 4 in 4/4, 3 in 3/4 and in 6/8. */
+export function barLength(l: { time?: [number, number] }): number {
+  const [n, d] = l.time ?? [4, 4];
+  return (n * 4) / d;
 }
 
 export interface TouchReq {
@@ -684,6 +692,146 @@ export const LESSONS: Lesson[] = [
     bars: 8,
     bpm: 60,
     mask: 2
+  },
+  {
+    id: 'noire-pointee',
+    number: 24,
+    title: 'La noire pointée',
+    goal: 'Tenir une noire et demie, puis placer la croche sur le « et ».',
+    setup: 'Pouce droit sur le C central.',
+    theory: [
+      'Le point (dot) après une note l’allonge de la moitié de sa valeur. Noire pointée = 1 temps + ½ temps = 1 temps et demi. Blanche pointée = 2 + 1 = 3 temps.',
+      'La noire pointée est presque toujours suivie d’une croche : ensemble, elles font 2 temps. Compte « 1 — 2 et » : la noire pointée dure de 1 jusqu’à 2, la croche tombe sur le « et ».',
+      'Le piège : jouer la croche trop tôt, sur le 2. Tiens bien la noire pointée jusqu’au « et ». L’app vérifie aussi que tu la tiens jusqu’au bout.'
+    ],
+    mode: 'rhythm',
+    arrangement: 'rh',
+    rh: C_RH,
+    keyFifths: 0,
+    rhythms: [
+      [[1.5, 0.5, 2], 3],
+      [[1.5, 0.5, 1, 1], 3],
+      [[2, 1.5, 0.5], 2],
+      [[1, 1.5, 0.5, 1], 2],
+      [[3, 1], 2],
+      [[2, 1, 1], 1]
+    ],
+    bars: 8,
+    bpm: 60
+  },
+  {
+    id: 'liaisons',
+    number: 25,
+    title: 'Les liaisons de durée',
+    goal: 'Une seule note pour deux valeurs liées, même par-dessus la barre de mesure.',
+    setup: 'Pouce droit sur le C central.',
+    theory: [
+      'Une liaison de durée (tie) est un petit arc qui relie deux notes de même hauteur. On joue la première et on la tient pendant la durée des deux, sans rejouer la seconde.',
+      'Elle sert surtout à tenir une note par-dessus la barre de mesure : la note commence à la fin d’une mesure et continue au début de la suivante.',
+      'Ne la confonds pas avec la liaison d’expression (slur), qui relie des notes différentes pour les jouer liées : là, chaque note se joue.',
+      'Rejouer la note liée compte comme une faute (une note en trop), et la lâcher trop tôt aussi : l’app vérifie quand tu relâches la touche.'
+    ],
+    mode: 'rhythm',
+    arrangement: 'rh',
+    rh: C_RH,
+    keyFifths: 0,
+    rhythms: [
+      [[2, 2], 2],
+      [[1, 1, 2], 2],
+      [[2, 1, 1], 2],
+      [[1, 1, 1, 1], 1],
+      // Longer than the bar: the last note is tied into the next one.
+      [[2, 1, 2], 3],
+      [[1, 1, 1, 2], 3],
+      [[3, 2], 2]
+    ],
+    bars: 8,
+    bpm: 60
+  },
+  {
+    id: 'trois-temps',
+    number: 26,
+    title: 'La mesure à trois temps',
+    goal: 'Lire et jouer en 3/4 : trois temps par mesure, la blanche pointée.',
+    setup: 'Main droite en position de C, main gauche en position de C3.',
+    theory: [
+      'Le chiffrage 3/4 (three-four time) veut dire trois noires par mesure. C’est la mesure de la valse et du menuet.',
+      'Compte « 1, 2, 3 » : le 1 est le temps fort, un peu plus appuyé. Le métronome l’accentue.',
+      'Une mesure entière se remplit avec une blanche pointée (3 temps). Il n’y a plus de place pour une ronde.',
+      'Ne garde pas l’habitude du 4 : après le 3, c’est déjà la mesure suivante.'
+    ],
+    mode: 'rhythm',
+    arrangement: 'alternate',
+    rh: C_RH,
+    lh: C_LH,
+    keyFifths: 0,
+    time: [3, 4],
+    rhythms: [
+      [[3], 1],
+      [[2, 1], 3],
+      [[1, 2], 2],
+      [[1, 1, 1], 3],
+      [[1.5, 0.5, 1], 2],
+      [[1, 0.5, 0.5, 1], 1]
+    ],
+    bars: 12,
+    bpm: 72
+  },
+  {
+    id: 'syncopes',
+    number: 27,
+    title: 'Les syncopes',
+    goal: 'Jouer à contretemps : des notes qui commencent sur le « et » et enjambent le temps.',
+    setup: 'Pouce droit sur le C central.',
+    theory: [
+      'Une syncope (syncopation), c’est une note qui commence entre deux temps et dure par-dessus le temps suivant. Elle déplace l’appui : la musique « pousse ».',
+      'Le motif le plus courant : croche, noire, croche (« court-long-court »). Compte « 1 et 2 et » à voix haute : la noire commence sur le premier « et ».',
+      'En 4/4, une note qui enjambe le milieu de la mesure s’écrit en deux notes liées, pour qu’on voie où tombe le 3e temps. Une seule attaque, comme en leçon 25.',
+      'Garde le métronome : la syncope n’existe que par rapport à une pulsation régulière.'
+    ],
+    mode: 'rhythm',
+    arrangement: 'rh',
+    rh: C_RH,
+    keyFifths: 0,
+    rhythms: [
+      [[0.5, 1, 0.5, 2], 3],
+      [[1, 0.5, 1, 0.5, 1], 2],
+      [[0.5, 1, 1, 1, 0.5], 1],
+      [[2, 0.5, 1, 0.5], 2],
+      [[1, 1, 0.5, 1.5], 1],
+      [[1, 1, 2], 1]
+    ],
+    bars: 8,
+    bpm: 60
+  },
+  {
+    id: 'six-huit',
+    number: 28,
+    title: 'La mesure à 6/8',
+    goal: 'Six croches par mesure, groupées par trois : deux grands temps balancés.',
+    setup: 'Pouce droit sur le C central.',
+    theory: [
+      'En 6/8 (six-eight time), l’unité est la croche : six croches par mesure. Elles se groupent par trois, et on sent deux grands temps de trois croches, comme un balancement.',
+      'Compte « 1-2-3, 4-5-6 », en appuyant sur 1 et 4. Le métronome clique les six croches, avec l’accent sur 1.',
+      'Valeurs typiques : noire pointée = 3 croches (un grand temps), noire + croche = « long-court » à l’intérieur d’un grand temps, blanche pointée = la mesure entière.',
+      'C’est la mesure des berceuses, des barcarolles et de beaucoup de chansons de marins.'
+    ],
+    mode: 'rhythm',
+    arrangement: 'rh',
+    rh: C_RH,
+    keyFifths: 0,
+    time: [6, 8],
+    rhythms: [
+      [[1.5, 1.5], 3],
+      [[1, 0.5, 1, 0.5], 3],
+      [[0.5, 0.5, 0.5, 1.5], 2],
+      [[1.5, 1, 0.5], 2],
+      [[1, 0.5, 1.5], 2],
+      [[3], 1],
+      [[0.5, 0.5, 0.5, 0.5, 0.5, 0.5], 1]
+    ],
+    bars: 8,
+    bpm: 66
   }
 ];
 

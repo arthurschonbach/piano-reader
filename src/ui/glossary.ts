@@ -98,6 +98,11 @@ const GROUPS: { title: string; terms: Term[] }[] = [
       { fr: 'décompte', en: 'count-in', def: 'Les clics avant de commencer : une mesure d’amorce.' },
       { fr: 'nuances', en: 'dynamics', def: 'p (piano) = doux, f (forte) = fort, mf = mezzo-forte, crescendo = de plus en plus fort.' },
       { fr: 'lié / détaché', en: 'legato / staccato', def: 'Notes enchaînées sans trou / notes courtes et séparées (un point au-dessus).' },
+      { fr: 'liaison de durée', en: 'tie', def: 'Arc entre deux notes de même hauteur : on joue une fois, on tient les deux durées.' },
+      { fr: 'liaison d’expression', en: 'slur', def: 'Arc sur des notes différentes : on les joue liées.' },
+      { fr: 'note pointée', en: 'dotted note', def: 'Le point ajoute la moitié de la valeur : noire pointée = 1 temps et demi.' },
+      { fr: 'syncope / contretemps', en: 'syncopation / off-beat', def: 'Note qui commence entre deux temps et enjambe le temps suivant.' },
+      { fr: 'chiffrage (3/4, 6/8)', en: 'time signature', def: 'Nombre de temps par mesure et leur valeur : 3/4 = trois noires, 6/8 = six croches en deux groupes.' },
       { fr: 'ralentir / accélérer', en: 'ritardando / accelerando', def: 'rit. / accel. sur la partition.' },
       { fr: 'point d’orgue', en: 'fermata', def: 'On tient la note plus longtemps que prévu.' }
     ]

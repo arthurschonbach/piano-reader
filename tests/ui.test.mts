@@ -169,6 +169,16 @@ const startExercise = async (page: Page) => {
   const tr = await page.textContent('.results');
   ok(!!tr && tr.includes('Passage propre') && tr.includes('prochain essai à 54 bpm'), `technique: clean run raises the tempo (${tr?.slice(0, 200)})`);
 
+  // Advanced rhythm: tied notes held across the barline, and 6/8, played in time.
+  for (const id of ['liaisons', 'six-huit']) {
+    await page.goto(`http://localhost:5199/#/lecon/${id}`);
+    await startExercise(page);
+    await page.evaluate(() => (window as unknown as { __playInTime: () => void }).__playInTime());
+    await page.waitForSelector('.results', { timeout: 60000 });
+    const rt = await page.textContent('.results');
+    ok(!!rt && rt.includes('Séance validée') && rt.includes('100 %notes tenues'), `${id}: validated when played and held in time (${rt?.slice(0, 160)})`);
+  }
+
   // Ear training: eight phrases played back right first time move the level up.
   await page.goto('http://localhost:5199/#/oreille');
   await page.click('text=C’est parti');

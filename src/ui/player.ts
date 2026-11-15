@@ -281,12 +281,15 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
       app.metronome.unlock();
       msPerBeat = 60000 / bpm;
       // One bar of count-in; with a pickup, keep counting up to its first note.
-      const bpb = score.measures.find((m) => m.time)?.time?.[0] ?? 4;
+      // Bar length in quarter beats; in 6/8 the metronome clicks the six eighths.
+      const [tn, td] = score.measures.find((m) => m.time)?.time ?? [4, 4];
+      const bpb = (tn * 4) / td;
+      const unit = td === 8 ? 0.5 : 1;
       const pickup = score.measures.length > 1 && score.measures[0].length < bpb ? score.measures[0].length : 0;
       const countIn = bpb + (pickup ? bpb - pickup : 0);
       t0 = performance.now() + countIn * msPerBeat + 120;
       rhythm = new RhythmSession(buildTargets(score), msPerBeat);
-      clicks = new ClickTrack(app.metronome, t0, msPerBeat, -countIn, bpb, pickup);
+      clicks = new ClickTrack(app.metronome, t0, msPerBeat * unit, -countIn / unit, bpb / unit, pickup / unit);
       // The score scrolls on the compositor, in step with the clock the clicks use.
       sv.play(-countIn, t0 - countIn * msPerBeat, msPerBeat, endBeat);
       view.dataset.t0 = String(t0);

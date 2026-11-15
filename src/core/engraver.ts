@@ -416,6 +416,8 @@ export class ScoreRenderer {
     }
 
     const accStates = visible.map(() => [new Map<number, number>(), new Map<number, number>()]);
+    // Compound time (6/8…): eighths are beamed by three.
+    const beamUnit = score.measures.find((m) => m.time)?.time?.[1] === 8 ? 1.5 : 1;
     for (let st = 0; st < stCount; st++) {
       for (let j = 0; j < visible.length; j++) {
         const m = score.measures[visible[j]];
@@ -427,7 +429,7 @@ export class ScoreRenderer {
         for (const v of voices) {
           drawStream(ctx, list.filter((c) => c.voice === v), {
             st, SP, staffTop, staffBottom, bottomIdx, yIdx: yIdxFor(st), midIdx: bottomIdx[st] + 8,
-            acc, fingers: s.fingers !== false
+            acc, fingers: s.fingers !== false, beamUnit, barStart: m.startBeat
           });
         }
       }
@@ -655,6 +657,9 @@ interface StreamEnv {
   midIdx: number;
   acc: Map<number, number>;
   fingers: boolean;
+  /** Beams group notes within this many beats from the bar start (1, or 1.5 in 6/8). */
+  beamUnit: number;
+  barStart: number;
 }
 
 function drawStream(ctx: CanvasRenderingContext2D, list: Cluster[], e: StreamEnv): void {
@@ -667,7 +672,8 @@ function drawStream(ctx: CanvasRenderingContext2D, list: Cluster[], e: StreamEnv
   for (const c of list) {
     const beamable = !c.rest && !c.grace && c.base > 0 && c.base < 1;
     const prev = run[run.length - 1];
-    if (beamable && prev && Math.abs(prev.beat + prev.dur - c.beat) < 1e-6 && Math.floor(prev.beat) === Math.floor(c.beat)) {
+    const group = (b: number) => Math.floor((b - e.barStart) / e.beamUnit + 1e-9);
+    if (beamable && prev && Math.abs(prev.beat + prev.dur - c.beat) < 1e-6 && group(prev.beat) === group(c.beat)) {
       run.push(c);
     } else {
       if (run.length >= 2) beamed.push(run);
@@ -767,6 +773,8 @@ function drawRest(ctx: CanvasRenderingContext2D, c: Cluster, staffTopY: number, 
     y = staffTopY + SP;
   } else if (c.base >= 2) {
     code = 'restHalf';
+  } else if (c.base < 1) {
+    code = 'rest8th';
   }
   drawG(code, 4 * SP, c.x, y, 'b');
 }

@@ -2,7 +2,7 @@ import { parseMidi } from '../src/input/midi';
 import { NoteBus } from '../src/input/bus';
 import { buildSteps, HINT_AFTER, summarize, WaitSession } from '../src/exercise/wait';
 import { buildTargets, RhythmSession, summarizeRhythm } from '../src/exercise/rhythm';
-import { concatScores, generateExercise, phrasePlan } from '../src/curriculum/generate';
+import { concatScores, generateExercise, phrasePlan, writtenPieces } from '../src/curriculum/generate';
 import { mulberry32 } from '../src/core/random';
 import { analyzeDrill, DRILLS, drillById, drillPasses, drillScore } from '../src/curriculum/technique';
 import { availableDrills, drillOfTheDay } from '../src/curriculum/coach';
@@ -207,6 +207,23 @@ ok(ep.ear.level === 2 && ep.ear.sessions.length === 1 && ep.days.length === 1, '
 ok(dailyPlan(emptyProgress()).at(-1)?.kind === 'ear', 'daily plan: ends with ear training');
 ok(migrate({ ...emptyProgress(), ear: undefined }).ear.level === 1, 'ear: older saved progress gets a level');
 
+// --- Advanced rhythm ---
+ok(JSON.stringify(writtenPieces(1.5, 1, 4, [4, 4])) === '[[1.5,0.5],[2,0.5]]', 'notation: a syncopated quarter is tied across beat 3');
+ok(JSON.stringify(writtenPieces(1, 2, 4, [4, 4])) === '[[1,2]]', 'notation: a half note on beat 2 stays whole');
+ok(JSON.stringify(writtenPieces(3, 2, 4, [4, 4])) === '[[3,1],[4,1]]', 'notation: tied over the barline');
+ok(JSON.stringify(writtenPieces(1, 1, 3, [6, 8])) === '[[1,0.5],[1.5,0.5]]', 'notation: 6/8 keeps the two groups visible');
+ok(JSON.stringify(writtenPieces(0, 2.5, 4, [4, 4])) === '[[0,2],[2,0.5]]', 'notation: unwritable lengths are split');
+const anyLesson = (id: string, test: (sc: Score) => boolean) => [1, 2, 3, 4, 5, 6, 7, 8].some((seed) => test(generateExercise(LESSONS.find((l) => l.id === id)!, { seed })));
+ok(anyLesson('liaisons', (sc) => sc.measures.some((m, i) => i > 0 && m.notes.some((n) => n.tieStop && n.beat === m.startBeat))), 'ties lesson: notes tied over the barline');
+ok(anyLesson('syncopes', (sc) => sc.measures.some((m) => m.notes.some((n) => n.tieStop && n.beat === m.startBeat + 2))), 'syncopation lesson: a note tied across beat 3');
+ok(anyLesson('noire-pointee', (sc) => sc.measures.some((m) => m.notes.some((n) => n.dur === 1.5 && n.dots === 1 && n.base === 1))), 'dotted lesson: dotted quarters');
+const sixEight = generateExercise(LESSONS.find((l) => l.id === 'six-huit')!, { seed: 4 });
+ok(sixEight.measures[0].time?.join('/') === '6/8' && sixEight.measures.every((m) => m.length === 3) && sixEight.measures.at(-1)!.notes[0].dots === 1, '6/8: bars of six eighths, ends on a dotted half');
+const waltz = generateExercise(LESSONS.find((l) => l.id === 'trois-temps')!, { seed: 4 });
+ok(waltz.measures.every((m) => m.notes.filter((n) => n.rest && n.dur === 3).every((n) => n.base === 4)), '3/4: an empty bar shows a whole rest');
+const tiedTargets = buildTargets(generateExercise(LESSONS.find((l) => l.id === 'liaisons')!, { seed: 2 }));
+ok(tiedTargets.every((t) => !t.note.tieStop), 'ties: the tied-over note is not played again');
+
 // --- Generator, every lesson ---
 for (const l of LESSONS) {
   for (const seed of [1, 42, 777]) {
@@ -215,8 +232,10 @@ for (const l of LESSONS) {
     const tag = `L${l.number} seed ${seed}`;
     ok(sc.measures.length === l.bars, `${tag}: ${l.bars} bars`);
     const filled = sc.measures.every((m) =>
-      [...new Set(m.notes.map((n) => n.staff))].every((st) => Math.abs(m.notes.filter((n) => n.staff === st && !n.chord).reduce((a, n) => a + n.dur, 0) - 4) < 1e-9)
+      [...new Set(m.notes.map((n) => n.staff))].every((st) => Math.abs(m.notes.filter((n) => n.staff === st && !n.chord).reduce((a, n) => a + n.dur, 0) - m.length) < 1e-9)
     );
+    ok(notes.every((n) => [4, 3, 2, 1.5, 1, 0.75, 0.5, 0.25].includes(n.dur) && n.beat >= sc.measures.find((m) => m.notes.includes(n))!.startBeat), `${tag}: every note writable, inside its bar`);
+    ok(notes.filter((n) => n.tieStart).every((n) => n.tieTarget && n.tieTarget.midi === n.midi && Math.abs(n.tieTarget.beat - (n.beat + n.dur)) < 1e-9), `${tag}: ties join the same note, end to start`);
     ok(filled, `${tag}: every staff fills every bar`);
     const allowed = new Set(lessonNotes(l));
     ok(notes.filter((n) => !n.rest).every((n) => allowed.has(n.midi)), `${tag}: only the lesson's notes`);

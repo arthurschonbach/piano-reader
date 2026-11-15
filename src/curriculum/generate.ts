@@ -1,6 +1,6 @@
-import { makeNote, spellOfMidi, type Measure, type NoteItem, type Score } from '../core/model';
+import { computeTies, makeNote, spellOfMidi, type Measure, type Score } from '../core/model';
 import { mulberry32, weighted } from '../core/random';
-import type { Fn, Hand, Lesson, Rhythm } from './lessons';
+import { barLength, type Fn, type Hand, type Lesson, type Rhythm } from './lessons';
 
 export interface GenOptions {
   seed: number;
@@ -141,6 +141,27 @@ function attempt(lesson: Lesson, opts: GenOptions, rng: () => number): Record<Si
   const inChord = (m: number, fn: Fn) => FN_PCS[fn].includes((((m - tonic) % 12) + 12) % 12);
   const rhythms = opts.rhythms ?? lesson.rhythms;
   const bars = opts.bars ?? lesson.bars;
+  const L = barLength(lesson);
+  const total = (r: number[]) => r.reduce((a, d) => a + Math.abs(d), 0);
+  const fits = (r: number[]) => Math.abs(total(r) - L) < 1e-9;
+  // A rhythm longer than the bar holds its last note over the barline (a tie);
+  // the next bar of that hand then starts that much later.
+  const canOverflow = !['alternate', 'flash'].includes(lesson.arrangement);
+  const carry: Partial<Record<Side, number>> = {};
+  const pickRhythm = (side: Side, pool: Rhythm[], allowOver: boolean): number[] => {
+    const c = carry[side] ?? 0;
+    let cands = c
+      ? pool.filter(([r]) => fits(r) && r[0] >= c - 1e-9)
+      : pool.filter(([r]) => fits(r) || (allowOver && canOverflow && total(r) > L && r[r.length - 1] > 0));
+    if (!cands.length) cands = rhythms.filter(([r]) => fits(r) && (!c || r[0] >= c - 1e-9));
+    let r = cands.length ? weighted(rng, cands) : [L];
+    if (c) {
+      r = r[0] - c > 1e-9 ? [r[0] - c, ...r.slice(1)] : r.slice(1);
+      carry[side] = 0;
+    }
+    if (total(r) > L + 1e-9) carry[side] = total(r) - L;
+    return r;
+  };
   const out: Record<Side, Ev[][]> = { rh: [], lh: [] };
   const firstSide: Side = lesson.arrangement === 'lh' || (lesson.arrangement === 'alternate' && rng() < 0.5) ? 'lh' : 'rh';
   let started: Partial<Record<Side, boolean>> = {};
@@ -222,21 +243,23 @@ function attempt(lesson: Lesson, opts: GenOptions, rng: () => number): Record<Si
     const p = plan[b];
     const finalBar = last && !opts.noHome;
     let mel: Ev[] | null = null;
-    if (!finalBar && !(!opts.noHome && b === bars - 2) && p.kind === 'copy' && shapes[p.of]) mel = copyBar(b, side, shapes[p.of], p.move);
+    const shortened = !!carry[side];
+    const src = p.kind === 'copy' ? shapes[p.of] : undefined;
+    if (!finalBar && !shortened && !(!opts.noHome && b === bars - 2) && src && fits(src.rhythm)) mel = copyBar(b, side, src, (p as { move: boolean }).move);
     // The bar before the last one leads home: it ends on a note of the dominant.
     const leadsHome = !opts.noHome && b === bars - 2;
     if (!mel && leadsHome) {
       const V = FN_PCS.V.slice(0, 3);
-      mel = melody(side, weighted(rng, rhythms), false, acc ? prog[b] : undefined, (m) => (V.includes((((m - tonic) % 12) + 12) % 12) ? 6 : 0.2));
+      mel = melody(side, pickRhythm(side, rhythms, false), false, acc ? prog[b] : undefined, (m) => (V.includes((((m - tonic) % 12) + 12) % 12) ? 6 : 0.2));
     }
     if (!mel && p.kind === 'cadence' && !finalBar) {
       // Phrase ending: a longer last note, on the dominant (a question) or the tonic (an answer).
-      const pool = rhythms.filter(([r]) => Math.abs(r[r.length - 1]) >= 2 && r[r.length - 1] > 0);
-      const rhythm = weighted(rng, pool.length ? pool : rhythms);
+      const pool = rhythms.filter(([r]) => fits(r) && Math.abs(r[r.length - 1]) >= 2 && r[r.length - 1] > 0);
+      const rhythm = pickRhythm(side, pool.length ? pool : rhythms, false);
       const pcs = cadences++ % 2 === 0 ? FN_PCS.V.slice(0, 3) : FN_PCS.I;
       mel = melody(side, rhythm, false, acc ? prog[b] : undefined, (m) => (pcs.includes((((m - tonic) % 12) + 12) % 12) ? 4 : 0.3));
     }
-    mel ??= melody(side, finalBar ? [4] : weighted(rng, rhythms), last, acc ? prog[b] : undefined);
+    mel ??= melody(side, finalBar ? [L] : pickRhythm(side, rhythms, !last && b < bars - 2), last, acc ? prog[b] : undefined);
     const hand = handOf(side);
     shapes[b] = { side, rhythm: mel.map(([m, d]) => (m === null ? -d : d)), pos: mel.map(([m]) => (m === null ? null : hand.notes.indexOf(m as number))) };
     for (const [m] of mel) if (typeof m === 'number') count.set(m, (count.get(m) ?? 0) + 1);
@@ -304,7 +327,7 @@ function attempt(lesson: Lesson, opts: GenOptions, rng: () => number): Record<Si
       });
       out.lh.push(acc);
     } else {
-      out[other].push([[null, 4]]);
+      out[other].push([[null, L]]);
     }
   }
   return out;
@@ -341,35 +364,50 @@ export function generateExercise(lesson: Lesson, opts: GenOptions): Score {
 
   // Dynamics lessons: piano and forte, two bars each, starting either way.
   const firstDyn = lesson.dynamics ? (rng() < 0.5 ? 'p' : 'f') : undefined;
+  const L = barLength(lesson);
+  const time = lesson.time ?? [4, 4];
   const measures: Measure[] = [];
   for (let i = 0; i < bars; i++) {
-    const notes: NoteItem[] = [];
-    for (const side of ['rh', 'lh'] as Side[]) {
-      const bar = parts[side][i];
-      if (!bar) continue;
-      if (!grand && ((side === 'rh' && !hasRh) || (side === 'lh' && !hasLh))) continue;
-      let t = i * 4;
-      for (const [midi, dur] of bar) {
-        if (midi === null) notes.push(makeNote({ beat: t, dur, staff: staffOf(side), rest: true }));
-        else {
-          const ms = Array.isArray(midi) ? [...midi].sort((a, b) => a - b) : [midi];
-          ms.forEach((m, k) => notes.push(makeNote({ beat: t, dur, staff: staffOf(side), midi: m, spell: spellOfMidi(m, preferFlat), chord: k > 0 })));
-        }
-        t += dur;
-      }
-    }
     measures.push({
       number: i + 1,
-      startBeat: i * 4,
-      length: 4,
+      startBeat: i * L,
+      length: L,
       key: lesson.keyFifths,
       keyChange: i === 0,
-      time: i === 0 ? [4, 4] : null,
-      notes,
+      time: i === 0 ? time : null,
+      notes: [],
       dynamic: firstDyn && i % 2 === 0 ? ((i / 2) % 2 === 0 ? firstDyn : firstDyn === 'p' ? 'f' : 'p') : undefined
     });
   }
-  return {
+  for (const side of ['rh', 'lh'] as Side[]) {
+    if (!grand && ((side === 'rh' && !hasRh) || (side === 'lh' && !hasLh))) continue;
+    // One continuous line per hand: a note may run over the barline.
+    let t = 0;
+    for (const bar of parts[side]) {
+      for (const [midi, dur] of bar) {
+        const pieces = writtenPieces(t, dur, L, time);
+        pieces.forEach(([start, len], k) => {
+          const m = measures[Math.floor(start / L + 1e-9)];
+          if (!m) return;
+          if (midi === null) {
+            // A whole bar of silence is a whole rest, whatever the time signature.
+            const shape = Math.abs(len - L) < 1e-9 ? { base: 4, dots: 0 } : dotted(len, L);
+            m.notes.push(makeNote({ beat: start, dur: len, ...shape, staff: staffOf(side), rest: true }));
+            return;
+          }
+          const ms = Array.isArray(midi) ? [...midi].sort((x, y) => x - y) : [midi];
+          ms.forEach((mm, j) => {
+            const n = makeNote({ beat: start, dur: len, ...dotted(len, L), staff: staffOf(side), midi: mm, spell: spellOfMidi(mm, preferFlat), chord: j > 0 });
+            n.tieStart = k < pieces.length - 1;
+            n.tieStop = k > 0;
+            m.notes.push(n);
+          });
+        });
+        t += dur;
+      }
+    }
+  }
+  const score: Score = {
     title: lesson.title,
     bpm: lesson.bpm ?? 60,
     measures,
@@ -377,7 +415,45 @@ export function generateExercise(lesson: Lesson, opts: GenOptions): Score {
     staves: grand ? 2 : 1,
     clefs: grand ? ['G', 'F'] : [hasLh ? 'F' : 'G']
   };
+  computeTies(score);
+  return score;
 }
+
+/** Lengths that can be written as one note (with at most one dot). */
+const WRITABLE = [4, 3, 2, 1.5, 1, 0.75, 0.5, 0.25];
+
+/**
+ * How a note of `dur` beats starting at `t` is written: cut at barlines, at
+ * the middle of a 4/4 bar when it starts off the beat (or the dotted-quarter
+ * beat in 6/8), and into lengths that exist as single notes. Pieces are tied.
+ */
+export function writtenPieces(t: number, dur: number, L: number, time: [number, number]): [number, number][] {
+  const out: [number, number][] = [];
+  const mid = time[1] === 8 ? 1.5 : time[0] === 4 ? 2 : 0;
+  let s = t;
+  const end = t + dur;
+  while (end - s > 1e-9) {
+    const barStart = Math.floor(s / L + 1e-9) * L;
+    let cut = Math.min(end, barStart + L);
+    const rel = s - barStart;
+    // In 4/4 only an off-beat start is cut (a half note on beat 2 is fine); in 6/8, any start inside the first group.
+    const offBeat = time[1] === 8 || Math.abs(rel - Math.round(rel)) > 1e-9;
+    if (mid && offBeat && rel > 1e-9 && rel < mid - 1e-9 && cut - barStart > mid + 1e-9) cut = barStart + mid;
+    let len = cut - s;
+    if (!WRITABLE.some((w) => Math.abs(w - len) < 1e-9)) len = WRITABLE.find((w) => w < len + 1e-9) ?? len;
+    out.push([s, len]);
+    s += len;
+  }
+  return out;
+}
+
+/** Note shape for a length: a dotted half for 3 beats, and so on. A full-bar rest is a whole rest. */
+function dotted(len: number, L: number): { base: number; dots: number } {
+  if (Math.abs(len - L) < 1e-9 && L === 3) return { base: 2, dots: 1 };
+  if ([3, 1.5, 0.75].some((x) => Math.abs(x - len) < 1e-9)) return { base: (len * 2) / 3, dots: 1 };
+  return { base: len, dots: 0 };
+}
+
 
 /** Glue scores end to end (level test). Key changes are kept. */
 export function concatScores(parts: Score[], title: string): Score {
