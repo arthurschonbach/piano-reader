@@ -52,6 +52,37 @@ export function progression(bars: number, rng: () => number): Fn[] {
   return out.slice(out.length - bars);
 }
 
+/**
+ * What a bar does in its phrase: something new, a copy of an earlier bar
+ * (same notes, or moved up or down: a sequence; in the other hand: an
+ * imitation), or the cadence that closes the phrase.
+ */
+export type Plan = { kind: 'new' } | { kind: 'copy'; of: number; move: boolean } | { kind: 'cadence' };
+
+const NEW: Plan = { kind: 'new' };
+const CAD: Plan = { kind: 'cadence' };
+const copy = (of: number, move: boolean): Plan => ({ kind: 'copy', of, move });
+
+/** 4-bar phrase shapes; `of` counts from the phrase's first bar. */
+const PHRASES: Plan[][] = [
+  [NEW, copy(0, true), NEW, CAD], // motif, sequence, new idea, cadence
+  [NEW, copy(0, false), NEW, CAD], // motif, repeat
+  [NEW, NEW, copy(1, true), CAD],
+  [NEW, copy(0, true), copy(1, true), CAD] // a sequence that keeps climbing or falling
+];
+
+/** The shape of a whole exercise, in 4-bar phrases. Later phrases often bring the opening back. */
+export function phrasePlan(bars: number, rng: () => number): Plan[] {
+  const out: Plan[] = [];
+  for (let p = 0; p < bars; p += 4) {
+    let shape: Plan[];
+    if (p >= 4 && rng() < 0.6) shape = [copy(0, false), rng() < 0.5 ? copy(1, false) : copy(1, true), NEW, CAD];
+    else shape = PHRASES[Math.floor(rng() * PHRASES.length)].map((x) => (x.kind === 'copy' ? copy(x.of + p, x.move) : x));
+    out.push(...shape.slice(0, bars - p));
+  }
+  return out;
+}
+
 const consonant = (a: number, b: number) => [0, 3, 4, 7, 8, 9].includes((((a - b) % 12) + 12) % 12);
 
 class Walker {
@@ -89,7 +120,9 @@ class Walker {
 
 function attempt(lesson: Lesson, opts: GenOptions, rng: () => number): Record<Side, Ev[][]> {
   const weak = opts.weakness ?? new Map<number, number>();
-  const weight = (m: number) => 1 + 2 * (weak.get(m) ?? 0);
+  // Weak notes come up more, and so do notes not heard yet in this exercise.
+  const count = new Map<number, number>();
+  const weight = (m: number) => (1 + 2 * (weak.get(m) ?? 0)) * (count.get(m) ? 1 : 2);
   const shape = lesson.leapShape ?? DEFAULT_SHAPE;
   const free = lesson.arrangement === 'flash';
   const walkers: Partial<Record<Side, Walker>> = {};
@@ -113,9 +146,13 @@ function attempt(lesson: Lesson, opts: GenOptions, rng: () => number): Record<Si
   let started: Partial<Record<Side, boolean>> = {};
   const mirrorFirst = lesson.arrangement === 'mirror' && rng() < 0.5;
 
-  const melody = (side: Side, rhythm: number[], last: boolean, fn?: Fn): Ev[] => {
+  const handOf = (side: Side) => (side === 'rh' ? lesson.rh! : lesson.lh!);
+  const lastNote = (rhythm: number[]) => rhythm.reduce((k, d, i) => (d > 0 ? i : k), -1);
+  /** A new bar from the random walk. `end` steers the bar's last note (cadences). */
+  const melody = (side: Side, rhythm: number[], last: boolean, fn?: Fn, end?: (m: number) => number): Ev[] => {
     const w = walkers[side]!;
-    const hand = side === 'rh' ? lesson.rh! : lesson.lh!;
+    const hand = handOf(side);
+    const lastK = lastNote(rhythm);
     let t = 0;
     return rhythm.map((d, k): Ev => {
       const at = t;
@@ -128,13 +165,86 @@ function attempt(lesson: Lesson, opts: GenOptions, rng: () => number): Record<Si
       }
       // On beats 1 and 3, the melody mostly lands on a note of the bar's chord.
       const strong = fn && Math.abs(at % 2) < 1e-9;
-      return [w.next(strong ? (m) => (inChord(m, fn) ? 3 : 0.25) : undefined), d];
+      const bias = (m: number) => (strong ? (inChord(m, fn) ? 3 : 0.25) : 1) * (k === lastK && end ? end(m) : 1);
+      return [w.next(bias), d];
     });
+  };
+
+  // ---- phrase structure ----
+  const plan: Plan[] = free ? Array.from({ length: bars }, () => NEW) : phrasePlan(bars, rng);
+  /** Each bar's melody as positions in its hand's notes (null = rest). */
+  const shapes: { side: Side; rhythm: number[]; pos: (number | null)[] }[] = [];
+  let cadences = 0;
+  const fitOf = (side: Side, rhythm: number[], pos: (number | null)[], fn: Fn) => {
+    let f = 1;
+    let t = 0;
+    rhythm.forEach((d, k) => {
+      const p = pos[k];
+      if (p !== null && Math.abs(t % 2) < 1e-9) f *= inChord(handOf(side).notes[p], fn) ? 3 : 0.25;
+      t += Math.abs(d);
+    });
+    return f;
+  };
+  /** Copy an earlier bar's contour into this bar, if it fits the hand and joins up. */
+  const copyBar = (b: number, side: Side, src: (typeof shapes)[number], move: boolean): Ev[] | null => {
+    const hand = handOf(side);
+    const notes = src.pos.filter((p): p is number => p !== null);
+    if (!notes.length) return null;
+    const first = notes[0];
+    const w = walkers[side]!;
+    const shifts = move ? [1, -1, 2, -2] : [0];
+    let best: { start: number; fn?: Fn; score: number } | null = null;
+    for (const sh of shifts) {
+      const start = first + sh;
+      const pos = src.pos.map((p) => (p === null ? null : p - first + start));
+      if (pos.some((p) => p !== null && (p < 0 || p >= hand.notes.length))) continue;
+      if (started[side] && Math.abs(start - w.pos) > hand.maxLeap) continue;
+      let fit = 1;
+      let fn: Fn | undefined;
+      if (acc) {
+        // Harmonise the copy: the chord that fits it best, the planned one when tied.
+        for (const f of ['I', 'IV', 'V'] as Fn[]) {
+          const s = fitOf(side, src.rhythm, pos, f) * (f === prog[b] ? 1.5 : 1);
+          if (!fn || s > fit) [fn, fit] = [f, s];
+        }
+      }
+      const score = fit * (1 + rng());
+      if (!best || score > best.score) best = { start, fn, score };
+    }
+    if (!best) return null;
+    if (best.fn) prog[b] = best.fn;
+    const pos = src.pos.map((p) => (p === null ? null : p - first + best!.start));
+    w.pos = pos.filter((p): p is number => p !== null).at(-1)!;
+    started[side] = true;
+    return src.rhythm.map((d, k): Ev => (d < 0 ? [null, -d] : [hand.notes[pos[k]!], d]));
+  };
+  const realize = (b: number, side: Side, last: boolean): Ev[] => {
+    const p = plan[b];
+    const finalBar = last && !opts.noHome;
+    let mel: Ev[] | null = null;
+    if (!finalBar && !(!opts.noHome && b === bars - 2) && p.kind === 'copy' && shapes[p.of]) mel = copyBar(b, side, shapes[p.of], p.move);
+    // The bar before the last one leads home: it ends on a note of the dominant.
+    const leadsHome = !opts.noHome && b === bars - 2;
+    if (!mel && leadsHome) {
+      const V = FN_PCS.V.slice(0, 3);
+      mel = melody(side, weighted(rng, rhythms), false, acc ? prog[b] : undefined, (m) => (V.includes((((m - tonic) % 12) + 12) % 12) ? 6 : 0.2));
+    }
+    if (!mel && p.kind === 'cadence' && !finalBar) {
+      // Phrase ending: a longer last note, on the dominant (a question) or the tonic (an answer).
+      const pool = rhythms.filter(([r]) => Math.abs(r[r.length - 1]) >= 2 && r[r.length - 1] > 0);
+      const rhythm = weighted(rng, pool.length ? pool : rhythms);
+      const pcs = cadences++ % 2 === 0 ? FN_PCS.V.slice(0, 3) : FN_PCS.I;
+      mel = melody(side, rhythm, false, acc ? prog[b] : undefined, (m) => (pcs.includes((((m - tonic) % 12) + 12) % 12) ? 4 : 0.3));
+    }
+    mel ??= melody(side, finalBar ? [4] : weighted(rng, rhythms), last, acc ? prog[b] : undefined);
+    const hand = handOf(side);
+    shapes[b] = { side, rhythm: mel.map(([m, d]) => (m === null ? -d : d)), pos: mel.map(([m]) => (m === null ? null : hand.notes.indexOf(m as number))) };
+    for (const [m] of mel) if (typeof m === 'number') count.set(m, (count.get(m) ?? 0) + 1);
+    return mel;
   };
 
   for (let b = 0; b < bars; b++) {
     const last = b === bars - 1;
-    const pickRhythm = (pool: Rhythm[]) => (last && !opts.noHome ? [4] : weighted(rng, pool));
     let side: Side;
     switch (lesson.arrangement) {
       case 'lh':
@@ -156,7 +266,7 @@ function attempt(lesson: Lesson, opts: GenOptions, rng: () => number): Record<Si
         side = 'rh';
         break;
     }
-    const mel = melody(side, pickRhythm(rhythms), last, acc ? prog[b] : undefined);
+    const mel = realize(b, side, last);
     out[side].push(mel);
     const other: Side = side === 'rh' ? 'lh' : 'rh';
     if (acc) {

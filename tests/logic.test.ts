@@ -2,7 +2,8 @@ import { parseMidi } from '../src/input/midi';
 import { NoteBus } from '../src/input/bus';
 import { buildSteps, HINT_AFTER, summarize, WaitSession } from '../src/exercise/wait';
 import { buildTargets, RhythmSession, summarizeRhythm } from '../src/exercise/rhythm';
-import { concatScores, generateExercise } from '../src/curriculum/generate';
+import { concatScores, generateExercise, phrasePlan } from '../src/curriculum/generate';
+import { mulberry32 } from '../src/core/random';
 import { LESSONS, lessonNotes } from '../src/curriculum/lessons';
 import { PIECES, PIECE_STAGES, beatsPerBar, parseHand, pieceScore, pieceTags } from '../src/curriculum/pieces';
 import { blockPasses, currentLesson, currentPiece, dailyPlan, flashLesson, knownHands, passes, sightReadingLesson } from '../src/curriculum/coach';
@@ -174,6 +175,40 @@ ok(bar1 === '48,55,52,55,48,55,52,55', 'Alberti: low, high, middle, high');
 const lhMel = generateExercise(LESSONS.find((l) => l.id === 'melodie-main-gauche')!, { seed: 4 });
 ok(notesOf(lhMel, 0).some((n) => n.chord) && !notesOf(lhMel, 1).some((n) => n.chord), 'left-hand melody: chords move to the right hand');
 ok(generateExercise(LESSONS.find((l) => l.id === 'trois-accords')!, { seed: 4, bars: 2, noHome: true, grand: true }).measures.length === 2, 'chords: short blocks work too');
+
+// --- Phrases: motifs, sequences, imitation, cadences ---
+const plan8 = phrasePlan(8, mulberry32(5));
+ok(plan8.length === 8 && plan8[3].kind === 'cadence' && plan8[7].kind === 'cadence', 'phrases: each 4-bar phrase ends with a cadence');
+ok(plan8.every((p, i) => p.kind !== 'copy' || p.of < i), 'phrases: copies only look back');
+ok(phrasePlan(2, mulberry32(1)).length === 2, 'phrases: short blocks are cut, not padded');
+/** Per bar of one staff: rhythm and steps between notes (by position in the hand). */
+const contours = (sc: Score, staff: number, hand: number[]) =>
+  sc.measures.map((m) => {
+    const ns = m.notes.filter((n) => n.staff === staff && !n.chord).sort((a, b) => a.beat - b.beat);
+    const pos = ns.filter((n) => !n.rest).map((n) => hand.indexOf(n.midi));
+    return { rhythm: ns.map((n) => (n.rest ? -n.dur : n.dur)).join(), steps: pos.slice(1).map((p, i) => p - pos[i]).join(), first: pos[0], notes: pos.length };
+  });
+let withEcho = 0;
+let cadLong = 0;
+for (let seed = 1; seed <= 40; seed++) {
+  const sc = generateExercise(LESSONS[0], { seed });
+  const c = contours(sc, 0, LESSONS[0].rh!.notes);
+  if (c.some((x, i) => x.notes > 1 && c.slice(0, i).some((y) => y.rhythm === x.rhythm && y.steps === x.steps))) withEcho++;
+  const bar4 = sc.measures[3].notes.filter((n) => !n.rest).at(-1)!;
+  if (bar4.dur >= 2) cadLong++;
+}
+ok(withEcho >= 32, `phrases: most exercises repeat or sequence a bar (${withEcho}/40)`);
+ok(cadLong >= 30, `phrases: the 4th bar usually ends on a long note (${cadLong}/40)`);
+let imitations = 0;
+const mot = LESSONS.find((l) => l.id === 'motifs')!;
+for (let seed = 1; seed <= 20; seed++) {
+  const sc = generateExercise(mot, { seed });
+  const r = contours(sc, 0, mot.rh!.notes);
+  const l = contours(sc, 1, mot.lh!.notes);
+  // A bar in one hand with the same rhythm and steps as the bar just before in the other hand.
+  if (sc.measures.some((_, i) => i > 0 && [[r, l], [l, r]].some(([a, b]) => a[i].notes > 1 && a[i].rhythm === b[i - 1].rhythm && a[i].steps === b[i - 1].steps))) imitations++;
+}
+ok(imitations >= 15, `phrases: one hand imitates the other (${imitations}/20)`);
 
 const a1 = generateExercise(LESSONS[0], { seed: 7 }).measures.flatMap((m) => m.notes.map((n) => n.midi)).join();
 ok(a1 === generateExercise(LESSONS[0], { seed: 7 }).measures.flatMap((m) => m.notes.map((n) => n.midi)).join(), 'same seed, same exercise');

@@ -596,6 +596,36 @@ export const LESSONS: Lesson[] = [
     bars: 8,
     bpm: 60,
     touch: { balance: 10 }
+  },
+  {
+    id: 'motifs',
+    number: 21,
+    title: 'Lire par motifs',
+    goal: 'Au tempo, de C3 à C5 : repérer ce qui se répète au lieu de tout relire.',
+    setup: 'Les mains se déplacent : doigtés libres. Main droite autour du C central, main gauche autour du C3.',
+    theory: [
+      'La musique se répète presque toujours. Les exercices sont maintenant construits comme de vraies phrases de 4 mesures : un motif (motif), puis ce motif répété, déplacé ou imité, puis une fin de phrase.',
+      'Répétition : la mesure est identique à une mesure déjà jouée. Tu n’as rien à relire, rejoue-la.',
+      'Séquence (sequence) : même forme, même rythme, mais une note plus haut ou plus bas. Lis seulement la première note, les doigts refont le même dessin.',
+      'Imitation : l’autre main reprend le motif, une octave plus bas ou plus haut. Sur la portée, la forme est la même sur l’autre clé.',
+      'Cadence (cadence) : la 4e mesure de chaque phrase finit sur une note plus longue. Au milieu, elle reste en suspens (sur G ou D). À la fin, elle se pose sur C.',
+      'Pendant que tu joues une mesure, regarde la suivante et demande-toi : « nouveau, ou déjà vu ? ».'
+    ],
+    mode: 'rhythm',
+    arrangement: 'alternate',
+    rh: { notes: [60, 62, 64, 65, 67, 69, 71, 72], maxLeap: 3, home: 60 },
+    lh: { notes: [48, 50, 52, 53, 55, 57, 59, 60], maxLeap: 3, home: 48 },
+    leapShape: [0.3, 2, 2, 1.2],
+    keyFifths: 0,
+    rhythms: [
+      [[2, 2], 2],
+      [[2, 1, 1], 2],
+      [[1, 1, 2], 3],
+      [[1, 1, 1, 1], 2],
+      [[1, 0.5, 0.5, 2], 1]
+    ],
+    bars: 16,
+    bpm: 60
   }
 ];
 

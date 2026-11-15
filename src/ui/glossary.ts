@@ -70,7 +70,10 @@ const GROUPS: { title: string; terms: Term[] }[] = [
       { fr: 'accord plaqué / brisé', en: 'block chord / broken chord', def: 'Toutes les notes ensemble / l’une après l’autre.' },
       { fr: 'basse d’Alberti', en: 'Alberti bass', def: 'Accord brisé en croches : bas, haut, milieu, haut (C-G-E-G).' },
       { fr: 'basse-accord', en: 'oom-pah (bass and chord)', def: 'La basse seule, puis le reste de l’accord, en alternance.' },
-      { fr: 'cadence', en: 'cadence', def: 'La fin d’une phrase : V → I sonne conclusif, une fin sur V reste en suspens.' }
+      { fr: 'cadence', en: 'cadence', def: 'La fin d’une phrase : V → I sonne conclusif, une fin sur V reste en suspens.' },
+      { fr: 'motif / séquence', en: 'motif / sequence', def: 'Un petit dessin mélodique / le même dessin répété une note plus haut ou plus bas.' },
+      { fr: 'imitation', en: 'imitation', def: 'Une main reprend le motif que l’autre vient de jouer.' },
+      { fr: 'phrase', en: 'phrase', def: 'Une idée musicale complète, souvent 4 mesures, qui finit par une cadence.' }
     ]
   },
   {
