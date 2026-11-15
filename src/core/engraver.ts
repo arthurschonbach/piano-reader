@@ -38,6 +38,10 @@ export function setPalette(p: Palette): void {
   P = p;
 }
 
+export function currentPalette(): Palette {
+  return P;
+}
+
 /** Wait-mode feedback per note: to play now, right first time, right after mistakes, wrong key just pressed. */
 export type Mark = 'current' | 'ok' | 'late' | 'bad';
 
@@ -150,6 +154,12 @@ export interface DrawState {
   /** Cursor position as a fraction of the width (default 0.3). */
   anchor?: number;
   marks?: ReadonlyMap<NoteItem, Mark>;
+  /** Force the staff space (tiles of a scrolling view). */
+  sp?: number;
+  /** Beat used to grey out played notes (default: beat). */
+  stateBeat?: number;
+  /** Pin clefs on the left once bar 1 has scrolled away (default true). */
+  pin?: boolean;
   /** Fit this many beats in the width, starting at beat 0 (static sheet). */
   fitBeats?: number;
   /** Draw the vertical play-position line (default true). */
@@ -247,16 +257,9 @@ export class ScoreRenderer {
     return { clefW, timeW, keyW };
   }
 
-  draw(score: Score, s: DrawState): void {
-    const { ctx, w, h } = this;
-    // Several renderers can live on one page (sheet view): point the glyph helpers at ours.
-    VCTX = this.vctx;
-    RAW = ctx;
-    if (w < 2 || h < 2) return;
-    ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = P.paper;
-    ctx.fillRect(0, 0, w, h);
-
+  /** Layout shared by draw() and drawOverlay(). */
+  private geom(score: Score, s: DrawState) {
+    const { w, h } = this;
     const U = s.zoom;
     const single = (score.staves ?? 2) < 2;
     let SP = 10 * U;
@@ -265,6 +268,8 @@ export class ScoreRenderer {
     if (SP > maxSP) SP = Math.max(4, maxSP);
     // Narrow screens (phone in portrait): keep a few notes of look-ahead visible.
     SP = Math.max(4, Math.min(SP, w / 26));
+    // Tiles of a scrolling view must share the visible canvas's size.
+    if (s.sp) SP = s.sp;
     const staffH = 4 * SP;
     const gap = 6.5 * SP;
     const contentTotal = single ? staffH + 2 * SP : staffH * 2 + gap + 18;
@@ -290,6 +295,38 @@ export class ScoreRenderer {
     const anchorX = s.fitBeats ? 0 : w * (s.anchor ?? 0.3);
     this.lastView = { anchorX, lead, pxQ };
     const xOf = (b: number) => anchorX + lead + (b - s.beat) * pxQ;
+    return {
+      U, single, SP, trebleTop, trebleBottom, bassBottom, staffTop, staffBottom, bottomIdx, yIdxFor,
+      m0, lead, pxQ, anchorX, xOf, stCount: single ? 1 : 2
+    };
+  }
+
+  /** Staff space, left margin and spacing this renderer would use. */
+  layout(score: Score, s: DrawState): { SP: number; lead: number; pxQ: number; anchorX: number } {
+    const g = this.geom(score, s);
+    return { SP: g.SP, lead: g.lead, pxQ: g.pxQ, anchorX: g.anchorX };
+  }
+
+  /** Only the parts that move with the view: pinned clefs and the cursor. */
+  drawOverlay(score: Score, s: DrawState): void {
+    if (this.w < 2 || this.h < 2) return;
+    VCTX = this.vctx;
+    RAW = this.ctx;
+    this.overlay(score, s, this.geom(score, s));
+  }
+
+  draw(score: Score, s: DrawState): void {
+    const { ctx, w, h } = this;
+    // Several renderers can live on one page (sheet view): point the glyph helpers at ours.
+    VCTX = this.vctx;
+    RAW = ctx;
+    if (w < 2 || h < 2) return;
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = P.paper;
+    ctx.fillRect(0, 0, w, h);
+
+    const g = this.geom(score, s);
+    const { U, single, SP, trebleTop, trebleBottom, bassBottom, staffTop, staffBottom, bottomIdx, yIdxFor, lead, pxQ, anchorX, xOf } = g;
 
     const leftBeat = s.beat - (anchorX + lead) / pxQ;
     const rightBeat = s.beat + (w - anchorX - lead) / pxQ;
@@ -319,7 +356,7 @@ export class ScoreRenderer {
     const measureClusters: Cluster[][] = [];
     const pad = 0.65 * SP;
     for (const i of visible) {
-      const list = buildClusters(score.measures[i], xOf, s.beat, s.lookahead, pad);
+      const list = buildClusters(score.measures[i], xOf, s.stateBeat ?? s.beat, s.lookahead, pad);
       if (s.marks) for (const c of list) c.mark = c.members.map((n) => s.marks!.get(n)).find((m) => m);
       measureClusters.push(list);
     }
@@ -428,8 +465,14 @@ export class ScoreRenderer {
       }
     }
 
+    this.overlay(score, s, g);
+  }
+
+  private overlay(score: Score, s: DrawState, g: ReturnType<ScoreRenderer['geom']>): void {
+    const { ctx } = this;
+    const { SP, trebleTop, trebleBottom, bassBottom, staffTop, bottomIdx, yIdxFor, m0, lead, xOf, single, stCount } = g;
     // Once bar 1 has scrolled away, keep clefs and key signature pinned on the left.
-    if (m0 && xOf(m0.startBeat) - lead < 0) {
+    if (s.pin !== false && m0 && xOf(m0.startBeat) - lead < 0) {
       const cur = score.measures[measureAt(score, Math.max(0, s.beat))] ?? m0;
       const clefW = Math.max(gbox('gClef', 4 * SP).w, gbox('fClef', 4 * SP).w);
       const pinW = 1.0 * SP + clefW + 0.4 * SP + Math.abs(cur.key) * 1.08 * SP + 0.9 * SP;

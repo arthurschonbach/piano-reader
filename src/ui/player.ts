@@ -1,5 +1,6 @@
 import { ClickTrack } from '../core/audio';
-import { ScoreRenderer, type Mark } from '../core/engraver';
+import type { Mark } from '../core/engraver';
+import { ScrollView } from '../core/scroller';
 import { noteName, spellOfMidi, type NoteItem, type Score } from '../core/model';
 import { buildSteps, summarize, WaitSession, type StepResult, type Summary } from '../exercise/wait';
 import { buildTargets, RhythmSession, summarizeRhythm, WINDOWS, type RhythmSummary } from '../exercise/rhythm';
@@ -70,6 +71,21 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
   const { score, mode } = cfg;
   const marks = new Map<NoteItem, Mark>();
   const labels = new Set<NoteItem>();
+  // Every change to a note's look also tells the scroll view which tiles to redraw.
+  const setMark = (n: NoteItem, m: Mark) => {
+    marks.set(n, m);
+    sv.invalidateNotes([n]);
+    dirty = true;
+  };
+  const addLabel = (n: NoteItem) => {
+    labels.add(n);
+    sv.invalidateNotes([n]);
+  };
+  const clearMarks = () => {
+    marks.clear();
+    labels.clear();
+    sv.invalidateAll();
+  };
   let bpm = Math.round(cfg.bpm ?? score.bpm ?? 60);
 
   const view = h('div', 'ex');
@@ -90,6 +106,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     if (showNames && view.dataset.phase === 'play') assisted = true;
     namesBtn.classList.toggle('on', showNames);
     assistedNote.hidden = !assisted;
+    sv.setOptions({ names: showNames });
     dirty = true;
   });
   const assistedNote = h('span', 'assisted', 'séance non comptée');
@@ -158,7 +175,18 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
   root.append(view);
 
   // ---------- shared state ----------
-  const renderer = new ScoreRenderer(canvas);
+  // Pre-drawn tiles: each frame only slides them (smooth on tablets).
+  const sv = new ScrollView(canvas, score, {
+    lookahead: 0,
+    names: false,
+    zoom: 2.4,
+    pxPerBeat: mode === 'wait' ? 4.5 : 5.5,
+    anchor: mode === 'wait' ? 0.08 : 0.12,
+    cursor: mode === 'rhythm',
+    fingers: cfg.fingers !== false,
+    marks,
+    labels
+  });
   let dirty = true;
   let raf = 0;
   let last = 0;
@@ -192,7 +220,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
   const markCurrent = () => {
     const st = wait?.current;
     view.dataset.expected = st ? st.midis.join(',') : '';
-    if (st) for (const n of st.notes) marks.set(n, 'current');
+    if (st) for (const n of st.notes) setMark(n, 'current');
     setCount(`${wait?.results.length ?? 0} / ${steps.length}`);
     dirty = true;
   };
@@ -202,8 +230,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     overlay.remove();
     view.dataset.phase = 'play';
     finished = false;
-    marks.clear();
-    labels.clear();
+    clearMarks();
     assisted = showNames;
     assistedNote.hidden = !assisted;
     releaseWake ??= keepAwake();
@@ -235,7 +262,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     rhythm = null;
     clicks = null;
     wait = null;
-    marks.clear();
+    clearMarks();
     viewBeat = mode === 'wait' ? steps[0]?.beat ?? 0 : -2;
     dirty = true;
     setFeedback('');
@@ -286,18 +313,18 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
       const step = wait.current!;
       const fb = wait.noteOn(e.midi, e.time, app.bus.held);
       if (fb.kind === 'wrong') {
-        for (const n of step.notes) marks.set(n, 'bad');
+        for (const n of step.notes) setMark(n, 'bad');
         window.clearTimeout(badTimer);
         badTimer = window.setTimeout(() => {
           if (wait?.current === step) {
-            for (const n of step.notes) marks.set(n, 'current');
+            for (const n of step.notes) setMark(n, 'current');
             dirty = true;
           }
         }, 600);
         const sameName = step.midis.some((m) => m % 12 === fb.played % 12);
         let msg = sameName ? `${nameOf(fb.played)} : bonne note, mauvaise octave.` : `✗ Tu as joué ${nameOf(fb.played)}.`;
         if (fb.hint) {
-          for (const n of step.notes) labels.add(n);
+          for (const n of step.notes) addLabel(n);
           msg += ` C’est ${step.midis.map(nameOf).join(' + ')} : regarde où ${step.midis.length > 1 ? 'ils se placent' : 'il se place'} sur la portée.`;
         }
         setFeedback(msg, 'bad');
@@ -307,7 +334,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
       } else if (fb.kind === 'correct') {
         window.clearTimeout(badTimer);
         const clean = fb.result.wrong.length === 0;
-        for (const n of step.notes) marks.set(n, clean ? 'ok' : 'late');
+        for (const n of step.notes) setMark(n, clean ? 'ok' : 'late');
         setFeedback(clean ? '✓' : '✓ Trouvé.', clean ? 'good' : '');
         markCurrent();
         if (fb.done) window.setTimeout(() => finish(false), 450);
@@ -319,7 +346,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
       const hit = rhythm.noteOn(e.midi, beat);
       if (hit.kind === 'hit') {
         judged++;
-        marks.set(hit.target.note, hit.grade === 'perfect' ? 'ok' : 'late');
+        setMark(hit.target.note, hit.grade === 'perfect' ? 'ok' : 'late');
         const a = Math.round(hit.dtMs);
         setFeedback(hit.grade === 'perfect' ? '✓' : a < 0 ? 'un peu en avance' : 'un peu en retard', hit.grade === 'perfect' ? 'good' : '');
         dirty = true;
@@ -345,7 +372,10 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
   };
   syncInput();
   const offMidi = app.midi.onChange(syncInput);
-  const offTheme = app.onTheme(() => (dirty = true));
+  const offTheme = app.onTheme(() => {
+    sv.invalidateAll();
+    dirty = true;
+  });
 
   const onVisible = () => {
     if (document.visibilityState !== 'visible') return;
@@ -358,7 +388,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
 
   const resize = () => {
     const r = stage.getBoundingClientRect();
-    if (r.width > 0 && r.height > 0) renderer.resize(r.width, r.height);
+    if (r.width > 0 && r.height > 0) sv.resize(r.width, r.height);
     dirty = true;
   };
   const ro = new ResizeObserver(resize);
@@ -384,7 +414,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
       if (viewBeat < 0) setFeedback(`${Math.ceil(-viewBeat)}…`);
       for (const t of rhythm.tick(viewBeat - app.settings.latencyMs / msPerBeat)) {
         judged++;
-        marks.set(t.note, 'bad');
+        setMark(t.note, 'bad');
         setFeedback('raté', 'bad');
       }
       setCount(`${judged} / ${rhythm.targets.length}`);
@@ -393,18 +423,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     }
     if (!dirty) return;
     dirty = false;
-    renderer.draw(score, {
-      beat: viewBeat,
-      lookahead: 0,
-      names: showNames,
-      zoom: 2.4,
-      pxPerBeat: mode === 'wait' ? 4.5 : 5.5,
-      anchor: mode === 'wait' ? 0.08 : 0.12,
-      cursor: mode === 'rhythm',
-      fingers: cfg.fingers !== false,
-      marks,
-      labels
-    });
+    sv.draw(viewBeat);
   };
   raf = requestAnimationFrame(frame);
   resize();
