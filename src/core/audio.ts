@@ -109,6 +109,50 @@ export class Metronome {
     };
   }
 
+  /** A plain piano-like tone, for when the piano can't play the notes itself. */
+  tone(midi: number, atPerfMs: number, durMs: number, level = 0.5): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.gain) return;
+    const t = ctx.currentTime + Math.max(0, (atPerfMs - performance.now()) / 1000);
+    const end = t + durMs / 1000;
+    const f = 440 * 2 ** ((midi - 69) / 12);
+    const g = ctx.createGain();
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = Math.min(6000, f * 6);
+    const peak = 0.32 * level;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(peak, t + 0.006);
+    g.gain.exponentialRampToValueAtTime(peak * 0.35, t + 0.35);
+    g.gain.setTargetAtTime(0.0001, end, 0.07);
+    const oscs = [
+      { type: 'triangle' as OscillatorType, mul: 1, amp: 1 },
+      { type: 'sine' as OscillatorType, mul: 2, amp: 0.35 },
+      { type: 'sine' as OscillatorType, mul: 3, amp: 0.12 }
+    ].map(({ type, mul, amp }) => {
+      const o = ctx.createOscillator();
+      o.type = type;
+      o.frequency.value = f * mul;
+      const a = ctx.createGain();
+      a.gain.value = amp;
+      o.connect(a);
+      a.connect(lp);
+      o.start(t);
+      o.stop(end + 0.5);
+      return [o, a] as const;
+    });
+    lp.connect(g);
+    g.connect(this.gain);
+    oscs[0][0].onended = () => {
+      for (const [o, a] of oscs) {
+        o.disconnect();
+        a.disconnect();
+      }
+      lp.disconnect();
+      g.disconnect();
+    };
+  }
+
   dispose(): void {
     void this.ctx?.close().catch(() => undefined);
     this.ctx = null;

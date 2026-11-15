@@ -6,12 +6,13 @@ import { concatScores, generateExercise, phrasePlan } from '../src/curriculum/ge
 import { mulberry32 } from '../src/core/random';
 import { analyzeDrill, DRILLS, drillById, drillPasses, drillScore } from '../src/curriculum/technique';
 import { availableDrills, drillOfTheDay } from '../src/curriculum/coach';
+import { dictationScore, EAR_LEVELS, EarTry, makeDictation, nextEarLevel } from '../src/curriculum/ear';
 import { LESSONS, lessonNotes } from '../src/curriculum/lessons';
 import { PIECES, PIECE_STAGES, beatsPerBar, parseHand, pieceScore, pieceTags } from '../src/curriculum/pieces';
 import { blockPasses, currentLesson, currentPiece, dailyPlan, flashLesson, knownHands, passes, sightReadingLesson } from '../src/curriculum/coach';
 import {
   addDays, dayKey, emptyProgress, exportProgress, importProgress, migrate, recordLesson, recordPiece, recordPlacement,
-  recordDrill, recordPractice, streak, validatedDays, weakestNotes, weaknessMap, type SessionMetrics
+  recordDrill, recordEar, recordPractice, streak, validatedDays, weakestNotes, weaknessMap, type SessionMetrics
 } from '../src/progress/store';
 import { dynamicsByMeasure, noteName, makeNote, spellOfMidi, type Score } from '../src/core/model';
 import { summarizeTouch, type TouchNote } from '../src/exercise/touch';
@@ -174,6 +175,37 @@ ok(availableDrills(fresh).every((d) => !d.after), 'drills: gated ones wait for t
 ok(drillOfTheDay(fresh)?.id === 'gamme-do-md', 'drills: the first one comes first');
 ok(drillOfTheDay(dp.progress)?.id === 'gamme-do-mg', 'drills: a drill at its goal leaves the rotation');
 ok(dailyPlan(fresh).some((a) => a.kind === 'technique'), 'daily plan: one technique drill');
+
+// --- Ear training ---
+for (const lv of EAR_LEVELS) {
+  let fine = true;
+  for (let seed = 1; seed <= 30; seed++) {
+    const d = makeDictation(lv, mulberry32(seed));
+    if (d.answer.length !== lv.length || d.sound.length !== lv.length) fine = false;
+    if (lv.kind === 'melody') {
+      if (!lv.starts.includes(d.answer[0]) || !d.answer.every((m) => lv.pool.includes(m))) fine = false;
+      if (d.answer.some((m, i) => i > 0 && Math.abs(lv.pool.indexOf(m) - lv.pool.indexOf(d.answer[i - 1])) > lv.maxStep)) fine = false;
+    } else if (d.answer[0] !== 48 || !d.sound.every((c, i) => c[0] === d.answer[i] && c.length === 4)) fine = false;
+    const sc = dictationScore(d);
+    if (!sc.measures.every((m) => Math.abs(m.notes.reduce((a, n) => a + n.dur, 0) - 4) < 1e-9)) fine = false;
+  }
+  ok(fine, `ear level ${lv.n}: dictations in range, steps allowed, bars full`);
+}
+const endings = Array.from({ length: 200 }, (_, i) => makeDictation(EAR_LEVELS[3], mulberry32(i)).answer.at(-1)! % 12);
+ok(endings.filter((pc) => [0, 4, 7].includes(pc)).length > 140, 'ear: phrases mostly end on C, E or G');
+const et = new EarTry({ level: EAR_LEVELS[0], answer: [60, 62, 64], sound: [[60], [62], [64]] });
+ok(et.noteOn(60)?.kind === 'ok' && et.noteOn(65)?.kind === 'wrong' && et.pos === 0, 'ear: a wrong note goes back to the start');
+et.noteOn(60);
+et.noteOn(62);
+const earLast = et.noteOn(64);
+ok(earLast?.kind === 'ok' && earLast.done && et.wrongs === 1, 'ear: phrase completed after one mistake');
+const bt = new EarTry(makeDictation(EAR_LEVELS[5], mulberry32(3)));
+ok(bt.noteOn(36)?.kind === 'ok', 'ear: a bass counts in any octave');
+ok(nextEarLevel(1, 8) === 2 && nextEarLevel(3, 5) === 3 && nextEarLevel(3, 2) === 2 && nextEarLevel(1, 0) === 1 && nextEarLevel(EAR_LEVELS.length, 8) === EAR_LEVELS.length, 'ear: level ladder');
+const ep = recordEar(emptyProgress(), 7, 8, 2);
+ok(ep.ear.level === 2 && ep.ear.sessions.length === 1 && ep.days.length === 1, 'ear: session recorded, level moved, day counted');
+ok(dailyPlan(emptyProgress()).at(-1)?.kind === 'ear', 'daily plan: ends with ear training');
+ok(migrate({ ...emptyProgress(), ear: undefined }).ear.level === 1, 'ear: older saved progress gets a level');
 
 // --- Generator, every lesson ---
 for (const l of LESSONS) {

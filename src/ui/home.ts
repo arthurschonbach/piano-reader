@@ -2,6 +2,7 @@ import { currentLesson, currentPiece, dailyPlan, duePieces, lessonDone } from '.
 import { LESSONS, MASTERY } from '../curriculum/lessons';
 import { PIECES } from '../curriculum/pieces';
 import { DRILLS } from '../curriculum/technique';
+import { EAR_LEVELS } from '../curriculum/ear';
 import { pieceRow } from './library';
 import type { MidiStatus } from '../input/midi';
 import { practisedToday, streak, validatedDays, weakestNotes } from '../progress/store';
@@ -125,9 +126,10 @@ export function renderHome(root: HTMLElement, app: App): () => void {
   page.append(pl, button(`📚 Bibliothèque · ${PIECES.length} morceaux`, 'btn wide-btn', () => app.go('#/bibliotheque')));
 
   // --- Technique ---
-  page.append(h('h2', 'sect', 'Technique'));
+  page.append(h('h2', 'sect', 'Technique et oreille'));
   const reached = Object.values(p.technique).filter((r) => r.reached).length;
   page.append(button(`🎹 Gammes, arpèges, accords · ${reached} / ${DRILLS.length} au tempo final`, 'btn wide-btn', () => app.go('#/technique')));
+  page.append(button(`👂 Oreille · niveau ${p.ear.level} / ${EAR_LEVELS.length} · ${EAR_LEVELS[p.ear.level - 1]?.title ?? ''}`, 'btn wide-btn', () => app.go('#/oreille')));
 
   // --- Footer links ---
   const weak = weakestNotes(p);

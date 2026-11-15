@@ -10,6 +10,7 @@ import {
 } from '../progress/store';
 import { playDrill, playFlash, playLesson, playPieceStage, playSight, type Hooks } from './activities';
 import { drillById } from '../curriculum/technique';
+import { renderEar } from './ear';
 import type { App } from './app';
 import { button, h, percent, resultCard, topBar } from './dom';
 import { mountPlayer, nameOf } from './player';
@@ -39,6 +40,8 @@ export function renderSession(root: HTMLElement, app: App): () => void {
         return playFlash(root, app, hooks);
       case 'technique':
         return playDrill(root, app, drillById(a.drillId)!, hooks);
+      case 'ear':
+        return renderEar(root, app, hooks);
       case 'sight':
         return playSight(root, app, hooks);
       case 'lesson':

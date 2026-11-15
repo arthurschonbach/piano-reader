@@ -169,6 +169,20 @@ const startExercise = async (page: Page) => {
   const tr = await page.textContent('.results');
   ok(!!tr && tr.includes('Passage propre') && tr.includes('prochain essai à 54 bpm'), `technique: clean run raises the tempo (${tr?.slice(0, 200)})`);
 
+  // Ear training: eight phrases played back right first time move the level up.
+  await page.goto('http://localhost:5199/#/oreille');
+  await page.click('text=C’est parti');
+  for (let i = 0; i < 8; i++) {
+    await page.waitForFunction(() => document.querySelector('.ear-status')?.textContent?.startsWith('À toi'), null, { timeout: 15000 });
+    const answer = JSON.parse((await page.evaluate(() => (document.querySelector('.ear') as HTMLElement).dataset.answer)) as string) as number[];
+    for (const m of answer) await page.evaluate((n) => (window as unknown as { __midi: (s: number, n: number, v: number) => void }).__midi(0x90, n, 80), m);
+    await page.waitForFunction(() => document.querySelector('.ear-status')?.textContent?.startsWith('✓'));
+    await page.click('.ear .actions .btn.primary');
+  }
+  await page.waitForSelector('.results');
+  const er = await page.textContent('.results');
+  ok(!!er && er.includes('8 / 8') && er.includes('Niveau suivant débloqué'), `ear: eight right answers level up (${er?.slice(0, 120)})`);
+
   // Daily session: warm-up first, then "Continuer".
   await page.goto('http://localhost:5199/#/seance');
   await startExercise(page);

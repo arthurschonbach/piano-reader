@@ -174,6 +174,19 @@ button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent);
 .strip-mask.peek { opacity: 0.12; }
 .tempo-bar { height: 4px; border-radius: 2px; background: var(--line); margin-top: 6px; overflow: hidden; max-width: 240px; }
 .tempo-bar > span { display: block; height: 100%; background: var(--accent); }
+.ear .page { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; }
+.ear-count { color: var(--muted); margin: 8px 0 0; }
+.ear-status { font-size: 1.3rem; font-weight: 600; margin: 4px 0; min-height: 1.6em; }
+.ear-dots { display: flex; gap: 10px; min-height: 18px; }
+.ear-dots .dot { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--muted); }
+.ear-dots .dot.on { background: var(--good); border-color: var(--good); }
+.ear .feedback { min-height: 1.5em; }
+.ear .feedback[data-tone="good"] { color: var(--good); }
+.ear .feedback[data-tone="bad"] { color: var(--bad); }
+.ear-sheet { width: 100%; max-width: 560px; height: 150px; }
+.ear-sheet canvas { width: 100%; height: 150px; display: block; border-radius: 10px; }
+.ear-names { font-weight: 600; letter-spacing: 0.04em; min-height: 1.4em; }
+.ear.has-kbd .kbd-slot { position: sticky; bottom: 0; }
 .feedback {
   /* Fixed height: a longer message must never resize the score above it. */
   text-align: center; height: 3.2em; padding: 4px 16px; font-size: 1.1rem; font-weight: 600; line-height: 1.3;

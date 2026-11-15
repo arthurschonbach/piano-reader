@@ -140,6 +140,7 @@ export function drillOfTheDay(p: Progress): Drill | null {
 export type Activity =
   | { kind: 'flash'; label: string }
   | { kind: 'technique'; label: string; drillId: string }
+  | { kind: 'ear'; label: string }
   | { kind: 'sight'; label: string }
   | { kind: 'lesson'; label: string; lessonId: string; review: boolean }
   | { kind: 'piece'; label: string; pieceId: string; stage: number; review: boolean };
@@ -167,6 +168,8 @@ export function dailyPlan(p: Progress, now = Date.now()): Activity[] {
     const stage = p.pieces[piece.id]?.stage ?? 0;
     out.push({ kind: 'piece', label: `${piece.title} · ${PIECE_STAGES[stage].label}`, pieceId: piece.id, stage, review: false });
   }
+  // Last, and short: a few phrases to play back by ear.
+  out.push({ kind: 'ear', label: `Oreille · niveau ${p.ear.level}` });
   return out;
 }
 

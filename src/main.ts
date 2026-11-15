@@ -3,6 +3,7 @@ import { lessonById } from './curriculum/lessons';
 import { playDrill, playLesson } from './ui/activities';
 import { drillById } from './curriculum/technique';
 import { renderTechnique } from './ui/technique';
+import { renderEar } from './ui/ear';
 import { createApp } from './ui/app';
 import { renderHome } from './ui/home';
 import { renderLibrary, renderPiece } from './ui/library';
@@ -29,6 +30,8 @@ function route(): void {
     cleanup = renderPiece(root, app, m[1]);
   } else if ((m = /^#\/technique\/([\w-]+)$/.exec(hash)) && drillById(m[1])) {
     cleanup = playDrill(root, app, drillById(m[1])!, { onExit: () => app.go('#/technique') });
+  } else if (hash === '#/oreille') {
+    cleanup = renderEar(root, app, { onExit: home, again: () => app.refresh() });
   } else if (hash === '#/technique') {
     cleanup = renderTechnique(root, app);
   } else if (hash === '#/bibliotheque') {

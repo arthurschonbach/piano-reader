@@ -51,6 +51,11 @@ export interface DrillRecord {
   sessions: SessionRecord[];
 }
 
+export interface EarRecord {
+  level: number;
+  sessions: { date: number; level: number; clean: number; total: number }[];
+}
+
 export interface Progress {
   version: 3;
   notes: Record<string, NoteStat>;
@@ -60,6 +65,8 @@ export interface Progress {
   pieces: Record<string, PieceRecord>;
   /** Technique drills, by id. */
   technique: Record<string, DrillRecord>;
+  /** Ear training: current level and past sessions. */
+  ear: EarRecord;
   /** Days with practice, "YYYY-MM-DD". */
   days: string[];
   placement?: { date: number; passed: string[]; stoppedAt: string | null };
@@ -76,6 +83,7 @@ export const emptyProgress = (): Progress => ({
   lessons: {},
   pieces: {},
   technique: {},
+  ear: { level: 1, sessions: [] },
   days: [],
   onboarded: false
 });
@@ -267,6 +275,13 @@ export function recordDrill(
   return { progress: p, raisedTo, reachedNow };
 }
 
+/** Record an ear session and move the level up or down. */
+export function recordEar(prev: Progress, clean: number, total: number, nextLevel: number, now = Date.now()): Progress {
+  const p = recordPractice(prev, { mode: 'wait', accuracy: total ? clean / total : 0, attempts: [], confusions: [], assisted: false }, now);
+  p.ear = { level: nextLevel, sessions: [...p.ear.sessions, { date: now, level: p.ear.level, clean, total }].slice(-KEEP_SESSIONS) };
+  return p;
+}
+
 export function pieceDue(rec: PieceRecord | undefined, stageCount: number, now = Date.now()): boolean {
   return !!rec && rec.stage >= stageCount && !!rec.due && rec.due <= dayKey(now);
 }
@@ -320,7 +335,13 @@ export function migrate(raw: unknown): Progress {
   const base = emptyProgress();
   if (!raw || typeof raw !== 'object') return base;
   const r = raw as Partial<Progress> & { version?: number };
-  if (r.version === 3) return { ...base, ...r } as Progress;
+  if (r.version === 3) {
+    // Fields added after version 3 shipped: fill them in when missing.
+    const p = { ...base, ...r } as Progress;
+    p.technique ??= {};
+    p.ear ??= { level: 1, sessions: [] };
+    return p;
+  }
   if (r.version === 2) {
     const lessons: Record<string, LessonRecord> = {};
     const days = new Set<string>();

@@ -25,8 +25,15 @@ interface MidiPortLike {
   onmidimessage: ((ev: { data: Uint8Array; timeStamp: number }) => void) | null;
 }
 
+interface MidiOutLike {
+  name?: string | null;
+  state?: string;
+  send(data: number[], timestamp?: number): void;
+}
+
 interface MidiAccessLike {
   inputs: { forEach(cb: (port: MidiPortLike) => void): void };
+  outputs?: { forEach(cb: (port: MidiOutLike) => void): void };
   onstatechange: (() => void) | null;
 }
 
@@ -44,6 +51,8 @@ function requestFn(): RequestMidi | null {
 export class MidiManager {
   status: MidiStatus;
   private access: MidiAccessLike | null = null;
+  /** The piano's MIDI input, to play notes on it (ear training). */
+  private out: MidiOutLike | null = null;
   private listeners = new Set<(s: MidiStatus) => void>();
 
   constructor(private bus: NoteBus) {
@@ -109,7 +118,28 @@ export class MidiManager {
       };
     });
     if (!devices.length) this.bus.releaseAll(performance.now());
+    this.out = null;
+    this.access.outputs?.forEach((port) => {
+      if (!this.out && port.state !== 'disconnected' && typeof port.send === 'function') this.out = port;
+    });
     this.set({ state: 'ready', devices });
+  }
+
+  /** True when notes can be played on the piano itself. */
+  get canPlay(): boolean {
+    return this.connected && this.out !== null;
+  }
+
+  /** Play a note on the piano: on at `atMs`, off `durMs` later (performance.now clock). */
+  playNote(midi: number, atMs: number, durMs: number, velocity = 64): boolean {
+    if (!this.out) return false;
+    try {
+      this.out.send([0x90, midi, velocity], atMs);
+      this.out.send([0x80, midi, 0], atMs + durMs);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private set(s: MidiStatus): void {
