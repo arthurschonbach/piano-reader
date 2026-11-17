@@ -342,8 +342,9 @@ for (const pc of PIECES) {
   ok(both.measures.every((m, i) => i === 0 || Math.abs(m.startBeat - both.measures[i - 1].startBeat - both.measures[i - 1].length) < 1e-9), `${pc.title}: bars follow each other`);
   ok(pc.level >= 1 && pc.level <= 5, `${pc.title}: level ${pc.level}`);
   ok(both.measures.every((m) => m.key === pc.keyFifths), `${pc.title}: key signature on every bar`);
-  ok(both.staves === 2 && pieceScore(pc, 'lh').clefs[0] === 'F', `${pc.title}: grand staff / bass clef alone`);
-  ok(both.measures[0].notes.some((n) => n.finger), `${pc.title}: starting fingers given`);
+  ok(both.staves === 2 && both.clefs[1] === (pc.lhClef ?? 'F') && pieceScore(pc, 'lh').clefs[0] === (pc.lhClef ?? 'F'), `${pc.title}: grand staff, left hand in its clef`);
+  // Folk tunes come with fingering; the transcribed pieces keep only what their source gives.
+  if (pc.level <= 2) ok(both.measures[0].notes.some((n) => n.finger), `${pc.title}: starting fingers given`);
   ok(buildTargets(both).length > 20, `${pc.title}: playable in rhythm mode`);
 }
 ok(PIECE_STAGES.length === 5 && PIECE_STAGES[0].hands === 'rh' && PIECE_STAGES[4].tempo === 1, 'piece stages: hands apart to full tempo');
@@ -372,7 +373,8 @@ ok(buildTargets(exLater).length === 1 && buildTargets(exLater)[0].midi === 66, '
 const wp = setPieceWeak(emptyProgress(), 'hymne-joie', { stage: 0, bars: [5, 6] });
 ok(wp.pieces['hymne-joie'].weak?.bars.join() === '5,6' && !setPieceWeak(wp, 'hymne-joie', null).pieces['hymne-joie'].weak, 'loop: weak bars saved and cleared');
 ok(dailyPlan({ ...wp, focusPiece: 'hymne-joie' }).some((a) => a.kind === 'loop'), 'daily plan: a pending loop comes before its piece');
-ok(PIECES.length >= 15 && [1, 2, 3, 4, 5].every((lv) => PIECES.some((p) => p.level === lv)), `library: ${PIECES.length} pieces covering levels 1 to 5`);
+ok(PIECES.filter((p) => p.lhClef === 'G').every((p) => pieceScore(p, 'both').clefs.join() === 'G,G'), 'pieces: a left hand written in treble clef keeps it');
+ok(PIECES.length >= 20 && [2, 3, 4, 5].every((lv) => PIECES.filter((p) => p.level === lv).length >= 4) && !PIECES.some((p) => p.level < 2), `library: ${PIECES.length} pieces, levels 2 to 5, no beginner level`);
 ok(new Set(PIECES.map((p) => p.id)).size === PIECES.length, 'library: unique ids');
 const hb = PIECES.find((p) => p.id === 'joyeux-anniversaire')!;
 ok(pieceScore(hb, 'both').measures[0].length === 1 && pieceTags(hb).includes('levée') && pieceTags(hb).includes('3/4'), 'pickup bar and tags');
@@ -403,14 +405,14 @@ ok(streak(p, d2) === 2 && streak(p, d2 + 86400000) === 2 && streak(p, d2 + 3 * 8
 // Pieces: stages then spaced reviews.
 let pp = emptyProgress();
 const n = PIECE_STAGES.length;
-for (let i = 0; i < n; i++) pp = recordPiece(pp, 'agneau', i, PIECE_STAGES[i].id, n, metrics(1, 700), true, d1).progress;
-ok(pp.pieces.agneau.stage === n && pp.pieces.agneau.due === addDays(dayKey(d1), 1), 'learnt piece: first review tomorrow');
-pp = recordPiece(pp, 'agneau', n - 1, 'tempo', n, metrics(1, 700), true, d2).progress;
-ok(pp.pieces.agneau.interval === 3, 'good review: next in 3 days');
-pp = recordPiece(pp, 'agneau', n - 1, 'tempo', n, metrics(0.5, 700), false, d2).progress;
-ok(pp.pieces.agneau.interval === 1, 'failed review: back to tomorrow');
-const stuck = recordPiece(emptyProgress(), 'agneau', 2, 'ensemble', n, metrics(1, 700), true, d1).progress;
-ok(stuck.pieces.agneau.stage === 0, 'stages cannot be skipped');
+for (let i = 0; i < n; i++) pp = recordPiece(pp, 'hymne-joie', i, PIECE_STAGES[i].id, n, metrics(1, 700), true, d1).progress;
+ok(pp.pieces['hymne-joie'].stage === n && pp.pieces['hymne-joie'].due === addDays(dayKey(d1), 1), 'learnt piece: first review tomorrow');
+pp = recordPiece(pp, 'hymne-joie', n - 1, 'tempo', n, metrics(1, 700), true, d2).progress;
+ok(pp.pieces['hymne-joie'].interval === 3, 'good review: next in 3 days');
+pp = recordPiece(pp, 'hymne-joie', n - 1, 'tempo', n, metrics(0.5, 700), false, d2).progress;
+ok(pp.pieces['hymne-joie'].interval === 1, 'failed review: back to tomorrow');
+const stuck = recordPiece(emptyProgress(), 'hymne-joie', 2, 'ensemble', n, metrics(1, 700), true, d1).progress;
+ok(stuck.pieces['hymne-joie'].stage === 0, 'stages cannot be skipped');
 
 // Placement and plan.
 let pl = recordPlacement(emptyProgress(), ['do-main-droite', 'do-main-gauche', 'alternance'], 'intervalles', d1);
@@ -439,7 +441,7 @@ ok(importProgress('n’importe quoi') === null, 'bad code rejected');
 pl = recordPractice(pl, metrics(1, 1), d1);
 ok(pl.days.includes(dayKey(d1)), 'practice marks the day');
 
-ok(currentPiece(emptyProgress())?.level === 1, 'without a choice, the easiest piece comes first');
+ok(currentPiece(emptyProgress())?.level === Math.min(...PIECES.map((p) => p.level)), 'without a choice, the easiest piece comes first');
 ok(currentPiece({ ...emptyProgress(), focusPiece: 'menuet-sol' })?.id === 'menuet-sol', 'the piece chosen in the library becomes current');
 
 if (fails) {

@@ -706,6 +706,10 @@ function drawStream(ctx: CanvasRenderingContext2D, list: Cluster[], e: StreamEnv
 
     if (c.rest) {
       drawRest(ctx, c, e.staffTop[st], SP, color);
+      // A dotted rest keeps its dot (whole-bar rests are written without one).
+      for (let d = 0; d < c.primary.dots && c.base < 4; d++) {
+        drawG('augmentationDot', 2.7 * SP, c.x + 1.35 * SP + d * 0.8 * SP, e.staffTop[st] + 1.5 * SP, 'cink');
+      }
       continue;
     }
 
@@ -841,6 +845,8 @@ function drawRest(ctx: CanvasRenderingContext2D, c: Cluster, staffTopY: number, 
     y = staffTopY + SP;
   } else if (c.base >= 2) {
     code = 'restHalf';
+  } else if (c.base < 0.5 - 1e-9) {
+    code = 'rest16th';
   } else if (c.base < 1) {
     code = 'rest8th';
   }

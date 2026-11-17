@@ -71,7 +71,7 @@ export function renderLibrary(root: HTMLElement, app: App): () => void {
   draw();
   page.append(chips, list);
   page.append(
-    h('p', 'hint', 'Les niveaux : 1 = position fixe, notes longues · 2 = croches ou notes pointées, petite extension de la main · 3 = armure, mesure à 3 temps ou main gauche mobile · 4 = deux mains plus actives · 5 = croches partout, la main se déplace.')
+    h('p', 'hint', 'Les niveaux : 2 = mélodies connues, main gauche simple · 3 = armure, mesure à 3 temps, notes pointées · 4 = pièces originales, deux mains actives, doubles croches · 5 = menuets et études, la main se déplace. Les pièces de compositeurs sont transcrites note pour note d’éditions du Mutopia Project (domaine public).')
   );
   view.append(page);
   root.append(view);

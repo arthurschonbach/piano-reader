@@ -275,7 +275,7 @@ const startExercise = async (page: Page) => {
   ok((await page.textContent('.tb-title'))!.includes('2/'), 'session moves to step 2');
 
   // A piece: first stage, right hand alone.
-  await page.goto('http://localhost:5199/#/morceau/agneau');
+  await page.goto('http://localhost:5199/#/morceau/hymne-joie');
   await page.waitForSelector('.stages');
   ok((await page.locator('.pstage').count()) === 5, 'piece page lists 5 stages');
   await page.click('.pstage.current >> text=Travailler');
@@ -295,7 +295,7 @@ const startExercise = async (page: Page) => {
   await page.click('.chip >> text=/Avancé/');
   ok((await page.locator('.pieces .piece').count()) < all, 'level filter narrows the list');
   await page.click('.chip >> text=/Tous/');
-  await page.click('.piece:has-text("Menuet en sol") >> text=Ouvrir');
+  await page.click('.piece:has-text("Minuet in G") >> text=Ouvrir');
   await page.waitForSelector('.sheet-line');
   ok((await page.locator('.sheet-line').count()) >= 4, 'piece page shows the full score in lines');
   await page.click('text=Choisir comme morceau en cours');
