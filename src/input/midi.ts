@@ -32,10 +32,31 @@ interface MidiOutLike {
   open?: () => Promise<unknown>;
 }
 
+/** A list of ports: a Map in browsers, but bridges (iPad MIDI browsers) may hand an array or a plain object. */
+type PortList<T> = { forEach?: (cb: (port: T) => void) => void; values?: () => Iterable<T> } | T[] | Record<string, T>;
+
 interface MidiAccessLike {
-  inputs: { forEach(cb: (port: MidiPortLike) => void): void };
-  outputs?: { forEach(cb: (port: MidiOutLike) => void): void };
+  inputs: PortList<MidiPortLike>;
+  outputs?: PortList<MidiOutLike>;
   onstatechange: (() => void) | null;
+}
+
+/** Every port of a list, whatever shape the list has. */
+export function portsOf<T>(list: PortList<T> | undefined | null): T[] {
+  if (!list) return [];
+  try {
+    if (Array.isArray(list)) return list;
+    const l = list as { forEach?: (cb: (port: T) => void) => void; values?: () => Iterable<T> };
+    if (typeof l.forEach === 'function') {
+      const out: T[] = [];
+      l.forEach((p: T) => out.push(p));
+      return out;
+    }
+    if (typeof l.values === 'function') return [...l.values()];
+    return Object.values(list as Record<string, T>);
+  } catch {
+    return [];
+  }
 }
 
 type RequestMidi = (opts?: { sysex?: boolean }) => Promise<MidiAccessLike>;
@@ -101,32 +122,44 @@ export class MidiManager {
     this.set({ state: 'asking' });
     try {
       this.access = await req({ sysex: false });
-      this.access.onstatechange = () => this.refresh();
-      this.refresh();
     } catch {
+      // Only a refused request means "denied": a problem afterwards is ours, not the user's.
       this.set({ state: 'denied' });
+      return;
     }
+    try {
+      this.access.onstatechange = () => this.refresh();
+    } catch {
+      // read-only on some bridges: reconnecting then needs the button
+    }
+    this.refresh();
   }
 
   private refresh(): void {
     if (!this.access) return;
     const devices: string[] = [];
-    this.access.inputs.forEach((port) => {
-      if (port.state === 'disconnected') return;
+    for (const port of portsOf(this.access.inputs)) {
+      if (port.state === 'disconnected') continue;
       devices.push(port.name || 'Clavier MIDI');
       port.onmidimessage = (ev) => {
         const e = parseMidi(ev.data, ev.timeStamp || performance.now());
         if (e) this.bus.emit(e);
       };
-    });
+    }
     if (!devices.length) this.bus.releaseAll(performance.now());
+    // Outputs are a bonus (ear training): whatever happens here must not cost the input.
     this.outs = [];
-    this.access.outputs?.forEach((port) => {
-      if (port.state === 'disconnected' || typeof port.send !== 'function') return;
+    for (const port of portsOf(this.access.outputs)) {
+      if (port.state === 'disconnected' || typeof port.send !== 'function') continue;
       this.outs.push(port);
-      // Opening is implicit on send, but some Android stacks only deliver once opened.
-      void port.open?.().catch(() => undefined);
-    });
+      try {
+        // Opening is implicit on send, but some Android stacks only deliver once opened.
+        const opened = port.open?.() as unknown;
+        if (opened && typeof (opened as Promise<unknown>).catch === 'function') (opened as Promise<unknown>).catch(() => undefined);
+      } catch {
+        // a bridge without a working open(): sending still opens the port
+      }
+    }
     this.set({ state: 'ready', devices });
   }
 

@@ -54,6 +54,15 @@ const FAKE_EARLY = `
     }
   };
 `;
+// An iPad "Web MIDI browser" style bridge: open() returns nothing and the output list is a plain object.
+const FAKE_BRIDGE = `
+  const input = { id: 'fp10', name: 'FP-10', state: 'connected', onmidimessage: null };
+  window.__sent = [];
+  const output = { id: 'fp10-out', name: 'FP-10', state: 'connected', send: (d) => window.__sent.push([...d]), open: () => undefined };
+  const access = { inputs: new Map([['fp10', input]]), outputs: { 'fp10-out': output }, onstatechange: null };
+  Object.defineProperty(Navigator.prototype, 'requestMIDIAccess', { value: () => Promise.resolve(access), configurable: true });
+  window.__midi = (s, n, v) => input.onmidimessage && input.onmidimessage({ data: new Uint8Array([s, n, v]), timeStamp: performance.now() });
+`;
 const NO_MIDI = `Object.defineProperty(Navigator.prototype, 'requestMIDIAccess', { value: undefined, configurable: true });`;
 
 async function newPage(init: string, viewport = { width: 1024, height: 700 }): Promise<{ page: Page; errors: string[] }> {
@@ -320,6 +329,25 @@ const startExercise = async (page: Page) => {
   ok(((await page.inputValue('textarea.code')) ?? '').length > 50, 'settings: progress code exported');
 
   ok(errors.length === 0, `no page errors (${errors.join(' | ')})`);
+  await page.close();
+}
+
+// ---------- iPad Web MIDI browser (a bridge with its own MIDI objects) ----------
+{
+  const { page, errors } = await newPage(FAKE_BRIDGE);
+  await page.goto('http://localhost:5199/#/');
+  await page.click('text=Connecter le piano');
+  const state = await page.waitForFunction(() => {
+    const s = document.querySelector('.piano-status') as HTMLElement | null;
+    return s && s.dataset.state !== 'asking' ? s.dataset.state : null;
+  }, null, { timeout: 5000 }).then((h) => h.jsonValue()).catch(() => 'stuck');
+  ok(state === 'connected', `bridge: the piano connects (${state}: ${await page.textContent('.piano-status')})`);
+  await page.goto('http://localhost:5199/#/reglages');
+  await page.click('text=Jouer un accord sur le piano');
+  await page.waitForTimeout(900);
+  const sent = (await page.evaluate(() => (window as unknown as { __sent: number[][] }).__sent)) as number[][];
+  ok(sent.some((d) => d[0] === 0x90 && d[1] === 60), `bridge: notes reach the piano (${sent.length} messages)`);
+  ok(errors.length === 0, `bridge: no page errors (${errors.join(' | ')})`);
   await page.close();
 }
 
