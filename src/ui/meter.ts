@@ -1,87 +1,77 @@
 /**
- * The timing meter under the cursor: one dot per key pressed (↓) and per key
- * let go (↑). Centre = right on time; left (blue) = too soon; right (orange) =
- * too late. The dots fade, so a tendency (rushing, dragging, short notes)
- * shows without reading anything.
+ * Timing lanes at the cursor, one per hand: the right hand's above the treble
+ * staff, the left hand's under the bass staff, so they never cover a note.
+ * Each key pressed leaves a dot: centre = on time, left (blue) = too soon,
+ * right (orange) = too late. Older dots fade, so a hand that rushes or drags
+ * shows as a cluster on one side, without reading anything.
  */
 
 /** Dots kept per lane: the latest ones, older ones fading. */
 const KEEP = 8;
 /** A value of ±1 is the edge of "right"; the lane shows up to ±LIMIT. */
 const LIMIT = 2.5;
-
-export type MeterLane = 'attack' | 'release';
+/** Lane width (px) and the height it needs, dots included. */
+export const LANE_W = 200;
+export const LANE_H = 16;
 
 export class TimingMeter {
-  readonly el: HTMLDivElement;
-  private lanes: Record<MeterLane, HTMLDivElement>;
+  private lanes: HTMLDivElement[] = [];
 
-  constructor(parent: HTMLElement) {
-    this.el = document.createElement('div');
-    this.el.className = 'meter';
-    this.el.setAttribute('aria-hidden', 'true');
-    const lane = (kind: MeterLane, icon: string, title: string) => {
-      const row = document.createElement('div');
-      row.className = `meter-row ${kind}`;
-      const ic = document.createElement('span');
-      ic.className = 'meter-icon';
-      ic.textContent = icon;
-      ic.title = title;
-      const track = document.createElement('div');
-      track.className = 'meter-track';
+  /** `hands`: one lane per staff (1 or 2). */
+  constructor(parent: HTMLElement, hands: number) {
+    for (let i = 0; i < hands; i++) {
+      const lane = document.createElement('div');
+      lane.className = `meter hand-${i}`;
+      lane.setAttribute('aria-hidden', 'true');
+      lane.style.width = `${LANE_W}px`;
       const ok = document.createElement('span');
       ok.className = 'meter-ok';
       // The "right" band is ±1 out of ±LIMIT.
       ok.style.left = `${50 - 50 / LIMIT}%`;
       ok.style.width = `${100 / LIMIT}%`;
-      track.append(ok);
-      row.append(ic, track);
-      this.el.append(row);
-      return track;
-    };
-    this.lanes = { attack: lane('attack', '↓', 'Appui'), release: lane('release', '↑', 'Relâché') };
-    const legend = document.createElement('div');
-    legend.className = 'meter-legend';
-    legend.innerHTML = '<span class="early">tôt</span><span class="late">tard</span>';
-    this.el.append(legend);
-    this.el.hidden = true;
-    parent.append(this.el);
+      lane.append(ok);
+      lane.hidden = true;
+      parent.append(lane);
+      this.lanes.push(lane);
+    }
   }
 
-  /** Centre the meter on the cursor, just under the music. */
-  place(x: number, top: number, maxTop: number): void {
-    const w = this.el.offsetWidth || 230;
-    this.el.style.left = `${Math.max(6, x - w / 2 - 9)}px`;
-    this.el.style.top = `${Math.min(top, maxTop)}px`;
-    this.el.hidden = false;
+  /** Centre each lane on the cursor at its own height (centre y, per staff). */
+  place(x: number, ys: number[]): void {
+    this.lanes.forEach((lane, i) => {
+      lane.style.left = `${Math.max(4, x - LANE_W / 2)}px`;
+      lane.style.top = `${ys[i] - LANE_H / 2}px`;
+      lane.hidden = false;
+    });
   }
 
   hide(): void {
-    this.el.hidden = true;
+    for (const l of this.lanes) l.hidden = true;
   }
 
   /**
-   * A dot on a lane. `x` is the error in tolerance units: 0 = exact, ±1 =
-   * the edge of what counts as right, negative = too soon.
+   * A dot on a hand's lane. `x` is the error in tolerance units: 0 = exact,
+   * ±1 = the edge of what counts as right, negative = too soon.
    */
-  add(lane: MeterLane, x: number): void {
-    const track = this.lanes[lane];
+  add(hand: number, x: number): void {
+    const lane = this.lanes[Math.min(hand, this.lanes.length - 1)];
+    if (!lane) return;
     const v = Math.max(-LIMIT, Math.min(LIMIT, x));
     const dot = document.createElement('i');
     dot.className = `meter-dot ${Math.abs(x) <= 1 ? 'ok' : x < 0 ? 'early' : 'late'}`;
     dot.style.left = `${50 + (50 * v) / LIMIT}%`;
-    track.querySelectorAll('.meter-dot.last').forEach((d) => d.classList.remove('last'));
+    lane.querySelectorAll('.meter-dot.last').forEach((d) => d.classList.remove('last'));
     dot.classList.add('last');
-    track.append(dot);
-    const dots = track.querySelectorAll('.meter-dot');
+    lane.append(dot);
+    const dots = lane.querySelectorAll('.meter-dot');
     for (let i = 0; i < dots.length - KEEP; i++) dots[i].remove();
   }
 
   clear(): void {
-    for (const t of Object.values(this.lanes)) t.querySelectorAll('.meter-dot').forEach((d) => d.remove());
+    for (const l of this.lanes) l.querySelectorAll('.meter-dot').forEach((d) => d.remove());
   }
 
   destroy(): void {
-    this.el.remove();
+    for (const l of this.lanes) l.remove();
   }
 }

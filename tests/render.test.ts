@@ -70,20 +70,22 @@ draw(generateExercise(LESSONS.find((l) => l.id === 'sol-majeur')!, { seed: 2 }),
 ok(stats().ink > 0.02, 'G major grand staff renders');
 writeFileSync(new URL('./out-grand.png', import.meta.url), canvas.toBuffer('image/png'));
 
-// A label on notes held the wrong length: "court" in red, "long" in amber.
+// Notes held the wrong length: a thick stem, blue (let go too soon) or orange (held too long).
 const held = generateExercise(LESSONS.find((l) => l.id === 'en-rythme')!, { seed: 4 });
 const firstNotes = held.measures[0].notes.filter((n) => !n.rest);
 draw(held, 0, undefined, { pxPerBeat: 9 });
 const noFlags = stats();
 draw(held, 0, undefined, { pxPerBeat: 9, holdFlags: new Map([[firstNotes[0], 'short' as const]]) });
 const shortFlag = stats();
-ok(shortFlag.blue > noFlags.blue + 0.0005, `"court" label in blue, like everything too soon (${(shortFlag.blue * 100).toFixed(2)}%)`);
+ok(shortFlag.blue > noFlags.blue + 0.0005, `short hold: blue stem, like everything too soon (${(shortFlag.blue * 100).toFixed(2)}%)`);
 writeFileSync(new URL('./out-holds.png', import.meta.url), canvas.toBuffer('image/png'));
 draw(held, 0, undefined, { pxPerBeat: 9, holdFlags: new Map([[firstNotes[0], 'long' as const]]) });
-ok(stats().orange > noFlags.orange + 0.0005, '"long" label in orange, like everything too late');
+ok(stats().orange > noFlags.orange + 0.0005, 'long hold: orange stem, like everything too late');
 const early = new Map([[firstNotes[0], 'early' as const]]);
 draw(held, 0, early, { pxPerBeat: 9 });
 ok(stats().blue > noFlags.blue + 0.0002, 'note played early turns blue');
+draw(held, 0, undefined, { pxPerBeat: 9, ghosts: new Map([[firstNotes[0], firstNotes[0].midi + 4]]) });
+ok(stats().red > noFlags.red + 0.0002, 'wrong key: a red ring where it sits on the staff');
 
 const piece = pieceScore(PIECES[2], 'both');
 draw(piece, 0, undefined, { fingers: false });

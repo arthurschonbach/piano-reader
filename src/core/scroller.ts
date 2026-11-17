@@ -26,7 +26,7 @@ export class ScrollStrip {
   private probe: ScoreRenderer;
   private w = 0;
   private h = 0;
-  private geo: { SP: number; lead: number; pxQ: number; anchorX: number; bottom: number } | null = null;
+  private geo: { SP: number; lead: number; pxQ: number; anchorX: number; bottom: number; staffTop: number[]; staffBottom: number[] } | null = null;
   private anim: Animation | null = null;
   private pinState = '';
   private overlayDirty = true;
@@ -134,11 +134,11 @@ export class ScrollStrip {
     this.mask.style.width = `${Math.max(SP, noteX + this.maskBeats * pxQ - 1.7 * SP - left)}px`;
   }
 
-  /** Where the cursor meets the music: its x, and the y just under the lowest staff. */
-  cursorPoint(): { x: number; below: number; SP: number } | null {
+  /** Where the cursor meets the music: its x, the y just under the lowest staff, and each staff's top and bottom. */
+  cursorPoint(): { x: number; below: number; SP: number; staffTop: number[]; staffBottom: number[] } | null {
     if (!this.geo) return null;
-    const { anchorX, lead, SP, bottom } = this.geo;
-    return { x: anchorX + lead + 1.25 * SP, below: bottom, SP };
+    const { anchorX, lead, SP, bottom, staffTop, staffBottom } = this.geo;
+    return { x: anchorX + lead + 1.25 * SP, below: bottom, SP, staffTop, staffBottom };
   }
 
   private offset(beat: number): number {

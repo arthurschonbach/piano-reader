@@ -1,5 +1,5 @@
 import { CanvasContext, Glyph } from 'vexflow';
-import { noteName, measureAt, totalBeats, type Measure, type NoteItem, type Score } from './model';
+import { noteName, measureAt, spellOfMidi, totalBeats, type Measure, type NoteItem, type Score } from './model';
 
 const K = 0.001036;
 /** Score colors. Swapped wholesale for dark mode via setPalette(). */
@@ -171,8 +171,12 @@ export interface DrawState {
   fingers?: boolean;
   /** Notes whose name is shown even when `names` is off (hints). */
   labels?: ReadonlySet<NoteItem>;
-  /** Notes let go too early ("short") or held into the next one ("long"). */
+  /** Notes let go too early ("short") or held into the next one ("long"): drawn on the stem. */
   holdFlags?: ReadonlyMap<NoteItem, HoldFlag>;
+  /** A wrong key played for this note: a red ghost head at the pitch actually played. */
+  ghosts?: ReadonlyMap<NoteItem, number>;
+  /** Space kept free above and below the staves (px), e.g. for the timing lanes. */
+  margin?: number;
   /** Repaint only this horizontal band (CSS px), leaving the rest of the canvas as it is. */
   region?: [number, number];
 }
@@ -277,7 +281,8 @@ export class ScoreRenderer {
     const single = (score.staves ?? 2) < 2;
     let SP = 10 * U;
     // A lone staff still needs room for ledger lines and note names below it.
-    const maxSP = single ? (h - 20) / 11 : (h - 26) / 16.8;
+    const mg = 2 * (s.margin ?? 0);
+    const maxSP = single ? (h - 20 - mg) / 11 : (h - 26 - mg) / 16.8;
     if (SP > maxSP) SP = Math.max(4, maxSP);
     // Narrow screens (phone in portrait): keep a few notes of look-ahead visible.
     SP = Math.max(4, Math.min(SP, w / 26));
@@ -315,9 +320,13 @@ export class ScoreRenderer {
   }
 
   /** Staff space, left margin and spacing this renderer would use. */
-  layout(score: Score, s: DrawState): { SP: number; lead: number; pxQ: number; anchorX: number; bottom: number } {
+  layout(score: Score, s: DrawState): { SP: number; lead: number; pxQ: number; anchorX: number; bottom: number; staffTop: number[]; staffBottom: number[] } {
     const g = this.geom(score, s);
-    return { SP: g.SP, lead: g.lead, pxQ: g.pxQ, anchorX: g.anchorX, bottom: g.single ? g.trebleBottom : g.bassBottom };
+    const n = g.stCount;
+    return {
+      SP: g.SP, lead: g.lead, pxQ: g.pxQ, anchorX: g.anchorX, bottom: g.single ? g.trebleBottom : g.bassBottom,
+      staffTop: g.staffTop.slice(0, n), staffBottom: g.staffBottom.slice(0, n)
+    };
   }
 
   /** Only the parts that move with the view: pinned clefs and the cursor. */
@@ -447,7 +456,7 @@ export class ScoreRenderer {
         for (const v of voices) {
           drawStream(ctx, list.filter((c) => c.voice === v), {
             st, SP, staffTop, staffBottom, bottomIdx, yIdx: yIdxFor(st), midIdx: bottomIdx[st] + 8,
-            acc, fingers: s.fingers !== false, beamUnit, barStart: m.startBeat, holdFlags: s.holdFlags
+            acc, fingers: s.fingers !== false, beamUnit, barStart: m.startBeat, holdFlags: s.holdFlags, ghosts: s.ghosts
           });
         }
       }
@@ -672,6 +681,7 @@ interface StreamEnv {
   acc: Map<number, number>;
   fingers: boolean;
   holdFlags?: ReadonlyMap<NoteItem, HoldFlag>;
+  ghosts?: ReadonlyMap<NoteItem, number>;
   /** Beams group notes within this many beats from the bar start (1, or 1.5 in 6/8). */
   beamUnit: number;
   barStart: number;
@@ -762,11 +772,14 @@ function drawStream(ctx: CanvasRenderingContext2D, list: Cluster[], e: StreamEnv
       const sx = up ? c.x + headW - 0.8 : c.x + 0.8;
       const yAvg = avgY(c, yIdx);
       const tip = up ? yAvg - 3.3 * SP : yAvg + 3.3 * SP;
-      ctx.lineWidth = 1.6;
+      stemStyle(ctx, c, e, color);
       ctx.beginPath();
       ctx.moveTo(sx, yAvg);
       ctx.lineTo(sx, tip);
       ctx.stroke();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.6;
+      ctx.lineCap = 'butt';
       if (c.grace) {
         ctx.lineWidth = 1.1;
         ctx.beginPath();
@@ -781,58 +794,62 @@ function drawStream(ctx: CanvasRenderingContext2D, list: Cluster[], e: StreamEnv
   }
 
   for (const g of beamed) drawBeamGroup(ctx, g, e);
-  if (e.holdFlags?.size) {
-    for (const c of list) {
-      const flag = c.members.map((n) => e.holdFlags!.get(n)).find((f) => f);
-      if (flag && !c.rest) drawHoldFlag(ctx, c, flag, e);
+  for (const c of list) {
+    if (c.rest) continue;
+    // A whole note has no stem: the hold gets a stem-like stroke of its own.
+    if (c.base >= 4 && holdOf(c, e)) {
+      const up = avgUp(c, e.midIdx);
+      const sx = up ? c.x + headW + 0.1 * SP : c.x - 0.1 * SP;
+      const yAvg = avgY(c, yIdx);
+      stemStyle(ctx, c, e, clusterColor(c, st));
+      ctx.beginPath();
+      ctx.moveTo(sx, yAvg + (up ? -0.6 : 0.6) * SP);
+      ctx.lineTo(sx, yAvg + (up ? -3.3 : 3.3) * SP);
+      ctx.stroke();
+    }
+    if (e.ghosts?.size) for (const n of c.members) {
+      const g = e.ghosts.get(n);
+      if (g !== undefined) drawGhost(ctx, c, n, g, e);
     }
   }
 }
 
+function holdOf(c: Cluster, e: StreamEnv): HoldFlag | undefined {
+  return e.holdFlags?.size ? c.members.map((n) => e.holdFlags!.get(n)).find((f) => f) : undefined;
+}
+
 /**
- * A small label on a note held the wrong length: "court" (let go too early,
- * red) or "long" (held into the next note, amber). Above the treble staff,
- * below the bass staff, so the two hands don't mix.
+ * The stem tells the hold, the head tells the attack: a note let go too soon
+ * gets a thick blue stem, one held into the next note a thick orange stem.
  */
-function drawHoldFlag(ctx: CanvasRenderingContext2D, c: Cluster, flag: HoldFlag, e: StreamEnv): void {
-  const { SP, st } = e;
+function stemStyle(ctx: CanvasRenderingContext2D, c: Cluster, e: StreamEnv, color: string): void {
+  const flag = holdOf(c, e);
+  ctx.strokeStyle = flag === 'short' ? P.early : flag === 'long' ? P.late : color;
+  ctx.lineWidth = flag ? Math.max(3, 0.32 * e.SP) : 1.6;
+  ctx.lineCap = flag ? 'round' : 'butt';
+}
+
+/**
+ * The key actually pressed instead of this note: a red ring on its own line
+ * or space, so "one line too high" or "wrong octave" shows without words.
+ */
+function drawGhost(ctx: CanvasRenderingContext2D, c: Cluster, n: NoteItem, midi: number, e: StreamEnv): void {
+  const { SP, yIdx } = e;
+  const sp = spellOfMidi(midi, n.spell.alter < 0);
+  const idx = sp.octave * 7 + sp.step;
   const headW = gbox('noteheadBlack', 4 * SP).w;
-  const ys = c.members.map((n) => e.yIdx(idxOf(n)));
-  const above = st === 0;
-  const text = flag === 'short' ? 'court' : 'long';
-  // Same language as the timing colours: blue = too soon, orange = too late.
-  const color = flag === 'short' ? P.early : P.late;
+  // Just right of the written note, never on it (a neighbour line would overlap).
+  const x = c.x + 1.45 * headW;
+  const y = yIdx(idx);
+  const b = e.bottomIdx[e.st];
   ctx.save();
-  ctx.font = `700 ${0.95 * SP}px system-ui, sans-serif`;
-  const tw = ctx.measureText(text).width;
-  const pw = tw + 1.1 * SP;
-  const ph = 1.55 * SP;
-  const cx = c.x + headW / 2;
-  // Clear of the bar number printed just above the treble staff.
-  const cy = above ? Math.min(e.staffTop[st] - 0.8 * SP, ...ys) - 1.7 * SP : Math.max(e.staffBottom[st], ...ys) + 1.6 * SP;
-  const x = cx - pw / 2;
-  const y = cy - ph / 2;
-  const r = ph / 2;
+  ctx.strokeStyle = P.bad;
+  for (let L = b + 10; L <= idx; L += 2) drawLedger(ctx, x, yIdx(L), SP, headW);
+  for (let L = b - 2; L >= idx; L -= 2) drawLedger(ctx, x, yIdx(L), SP, headW);
+  ctx.lineWidth = Math.max(2, 0.22 * SP);
   ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + pw, y, x + pw, y + ph, r);
-  ctx.arcTo(x + pw, y + ph, x, y + ph, r);
-  ctx.arcTo(x, y + ph, x, y, r);
-  ctx.arcTo(x, y, x + pw, y, r);
-  ctx.closePath();
-  ctx.fillStyle = P.paper;
-  ctx.fill();
-  ctx.globalAlpha = 0.16;
-  ctx.fillStyle = color;
-  ctx.fill();
-  ctx.globalAlpha = 1;
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 1.2;
+  ctx.ellipse(x + headW / 2, y, headW * 0.56, 0.62 * SP, -0.35, 0, Math.PI * 2);
   ctx.stroke();
-  ctx.fillStyle = color;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(text, cx, cy + 0.05 * SP);
   ctx.restore();
 }
 
@@ -885,13 +902,16 @@ function drawBeamGroup(ctx: CanvasRenderingContext2D, group: Cluster[], e: Strea
   const color = clusterColor(group[0], st);
   ctx.strokeStyle = color;
   ctx.fillStyle = color;
-  ctx.lineWidth = 1.6;
   group.forEach((c, j) => {
+    stemStyle(ctx, c, e, clusterColor(c, st));
     ctx.beginPath();
     ctx.moveTo(stemXs[j], avgY(c, yIdx));
     ctx.lineTo(stemXs[j], up ? bY + 0.3 * SP : bY - 0.3 * SP);
     ctx.stroke();
   });
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.6;
+  ctx.lineCap = 'butt';
   const counts = group.map((c) => Math.round(-Math.log2(c.base)));
   const layers = Math.max(...counts);
   const beamH = 0.5 * SP;

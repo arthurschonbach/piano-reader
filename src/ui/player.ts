@@ -2,14 +2,14 @@ import { ClickTrack } from '../core/audio';
 import type { HoldFlag, Mark } from '../core/engraver';
 import { ScrollStrip } from '../core/scroller';
 import { dynamicsByMeasure, measureAt, noteName, spellOfMidi, type NoteItem, type Score } from '../core/model';
-import { HOLD_SLACK, holdVerdict, LONG_SLACK, summarizeTouch, type TouchNote, type TouchSummary } from '../exercise/touch';
-import { TimingMeter } from './meter';
+import { holdVerdict, summarizeTouch, type TouchNote, type TouchSummary } from '../exercise/touch';
+import { LANE_H, TimingMeter } from './meter';
 import { buildSteps, summarize, WaitSession, type StepResult, type Summary } from '../exercise/wait';
 import { buildTargets, RhythmSession, summarizeRhythm, WINDOWS, type RhythmSummary, type Target } from '../exercise/rhythm';
 import { mountKeyboard } from '../input/keyboard';
 import type { NoteAttempt, SessionMetrics } from '../progress/store';
 import type { App } from './app';
-import { button, h, keepAwake, topBar } from './dom';
+import { button, h, keepAwake, percent, themeButton } from './dom';
 
 export const nameOf = (midi: number): string => noteName(spellOfMidi(midi));
 
@@ -21,6 +21,36 @@ export function beatsText(b: number): string {
   const f = frac > 0.7 ? '¾' : frac > 0.4 ? '½' : frac > 0.1 ? '¼' : '';
   if (!whole) return `${f || '0'} temps`;
   return `${whole} temps${f ? ` ${f}` : ''}`;
+}
+
+/** A tiny note: head coloured like the attack, stem like the hold. */
+function noteIcon(head: string, stem: string, ring = false): string {
+  const h = ring
+    ? `<ellipse cx="9" cy="24" rx="6" ry="4.4" transform="rotate(-20 9 24)" fill="none" stroke="var(--bad)" stroke-width="2"/>`
+    : `<ellipse cx="9" cy="24" rx="6" ry="4.4" transform="rotate(-20 9 24)" fill="var(--${head})"/>`;
+  const st = ring ? '' : `<line x1="14.4" y1="23" x2="14.4" y2="3" stroke="var(--${stem})" stroke-width="${stem === head ? 1.8 : 3.4}" stroke-linecap="round"/>`;
+  return `<svg viewBox="0 0 20 30" width="20" height="30" aria-hidden="true">${st}${h}</svg>`;
+}
+
+/**
+ * The colour language of rhythm mode, said once before playing, with pictures:
+ * head = attack, stem = hold, red ring = the key played instead, one lane per hand.
+ */
+function legend(twoHands: boolean): HTMLElement {
+  const box = h('div', 'legend');
+  const item = (svg: string, text: string) => {
+    const it = h('div', 'lg-item');
+    const pic = h('span', 'lg-pic');
+    pic.innerHTML = svg;
+    it.append(pic, h('span', undefined, text));
+    box.append(it);
+  };
+  item(noteIcon('good', 'good') + noteIcon('early', 'early') + noteIcon('late', 'late'), 'La tête : juste, trop tôt, trop tard.');
+  item(noteIcon('good', 'early') + noteIcon('good', 'late'), 'La queue : lâchée trop tôt, tenue trop longtemps.');
+  item(noteIcon('bad', 'bad', true), 'Un cercle rouge : la touche jouée à la place.');
+  const lane = `<svg viewBox="0 0 60 16" width="60" height="16" aria-hidden="true"><rect x="0" y="5" width="60" height="6" rx="3" fill="var(--line)"/><rect x="18" y="5" width="24" height="6" rx="3" fill="color-mix(in srgb, var(--good) 35%, var(--line))"/><circle cx="10" cy="8" r="5" fill="var(--early)"/><circle cx="31" cy="8" r="5" fill="var(--good)"/><circle cx="50" cy="8" r="5" fill="var(--late)"/></svg>`;
+  item(lane, twoHands ? 'Au curseur, une ligne par main : main droite au-dessus, main gauche en dessous. À gauche trop tôt, à droite trop tard.' : 'Au curseur : à gauche trop tôt, à droite trop tard.');
+  return box;
 }
 
 export interface Intro {
@@ -84,6 +114,52 @@ function waitMetrics(results: StepResult[], s: Summary, assisted: boolean): Sess
 }
 
 /**
+ * How each hand did, at a glance: its dots on a timing lane (as during the
+ * run) with the median marked, then the share of notes on time and held.
+ */
+function handsRecap(targets: Target[], msPerBeat: number, last: Set<Target>, sawRelease: boolean): HTMLElement {
+  const box = h('div', 'hands');
+  for (const [staff, name] of [[0, 'Main droite'], [1, 'Main gauche']] as const) {
+    const mine = targets.filter((t) => t.note.staff === staff);
+    if (!mine.length) continue;
+    const hits = mine.filter((t) => t.dtMs !== undefined && (t.grade === 'perfect' || t.grade === 'good'));
+    // Same rule as the run's score: right note within the timing window.
+    const onTime = hits.length / mine.length;
+    const dts = hits.map((t) => t.dtMs!).sort((a, b) => a - b);
+    const median = dts.length ? dts[Math.floor(dts.length / 2)] : 0;
+    const judged = sawRelease ? mine.filter((t) => t.onBeat !== undefined && t.offBeat !== undefined) : [];
+    const verdicts = judged.map((t) => holdVerdict(t.note.beat, t.note.tieEnd, t.offBeat!, msPerBeat, !last.has(t)));
+    const short = verdicts.filter((v) => v === 'short').length;
+    const long = verdicts.filter((v) => v === 'long').length;
+
+    const row = h('div', 'hand-row');
+    const lane = h('div', 'hand-lane');
+    const pos = (ms: number) => `${50 + (50 * Math.max(-2.5, Math.min(2.5, ms / WINDOWS.perfect))) / 2.5}%`;
+    for (const d of dts) {
+      const dot = h('i', `meter-dot ${Math.abs(d) <= WINDOWS.perfect ? 'ok' : d < 0 ? 'early' : 'late'}`);
+      dot.style.left = pos(d);
+      lane.append(dot);
+    }
+    if (dts.length) {
+      const m = h('b', `hand-median ${Math.abs(median) <= WINDOWS.perfect / 2 ? 'ok' : median < 0 ? 'early' : 'late'}`);
+      m.style.left = pos(median);
+      lane.append(m);
+    }
+    const tendency = dts.length < 3 || Math.abs(median) <= WINDOWS.perfect / 2 ? 'régulière' : median < 0 ? 'en avance' : 'en retard';
+    const facts = h('div', 'hand-facts');
+    facts.append(h('span', `hand-chip ${onTime >= 0.8 ? 'good' : ''}`, `${percent(onTime)} à temps · ${tendency}`));
+    if (judged.length) {
+      const held = 1 - (short + long) / judged.length;
+      const what = short > long ? 'lâche trop tôt' : long > short ? 'tient trop longtemps' : '';
+      facts.append(h('span', `hand-chip ${held >= 0.8 ? 'good' : ''}`, `${percent(held)} bien tenues${what && held < 0.95 ? ` · ${what}` : ''}`));
+    }
+    row.append(h('div', 'hand-name', name), lane, facts);
+    box.append(row);
+  }
+  return box;
+}
+
+/**
  * The exercise screen, for both modes:
  *  - wait: the score stops on each note until it's played right;
  *  - rhythm: the score moves at the tempo after a count-in, and timing is judged.
@@ -103,12 +179,17 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
   };
   // Rhythm mode: keys held down, and the notes held the wrong length (a label on the note).
   const holdFlags = new Map<NoteItem, HoldFlag>();
+  // A wrong key: shown as a red ring where it sits on the staff.
+  const ghosts = new Map<NoteItem, number>();
   const holding = new Map<number, Target>();
   const lastOfStaff = new Set<Target>();
   const clearMarks = () => {
     marks.clear();
     labels.clear();
     holdFlags.clear();
+    ghosts.clear();
+    delete view.dataset.short;
+    delete view.dataset.long;
     holding.clear();
     sv.invalidateAll();
   };
@@ -117,56 +198,40 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
   const view = h('div', 'ex');
   view.dataset.phase = 'intro';
   view.dataset.mode = mode;
+  // Top bar: nothing to tap up there (in full screen the iPad's top strip swallows taps).
   const count = h('div', 'count');
-  // Retour and the theme toggle go in the bottom toolbar (see navSlot below).
-  const navSlot = h('span', 'nav-slot');
-  view.append(topBar(app, cfg.title, cfg.onExit, count, navSlot));
+  const source = h('span', 'source');
+  const progress = h('div', 'ex-progress');
+  const progressFill = h('span');
+  progress.append(progressFill);
+  const bar = h('header', 'topbar');
+  bar.append(h('div', 'tb-title', cfg.title), source, count);
+  view.append(bar, progress);
   const stage = h('div', 'stage');
+  const countIn = h('div', 'countin');
+  countIn.setAttribute('aria-hidden', 'true');
+  stage.append(countIn);
   const feedback = h('div', 'feedback');
   feedback.setAttribute('aria-live', 'polite');
-  const tools = h('div', 'tools');
+  // Options are chosen on the intro card, before playing: changing them midway
+  // would change what the run measures.
   let showNames = false;
   let assisted = false;
-  const namesBtn = button('Noms des notes', 'btn toggle', () => {
-    showNames = !showNames;
-    if (showNames && view.dataset.phase === 'play') assisted = true;
-    namesBtn.classList.toggle('on', showNames);
-    assistedNote.hidden = !assisted;
-    sv.setOptions({ names: showNames });
-  });
-  const assistedNote = h('span', 'assisted', 'séance non comptée');
-  assistedNote.hidden = true;
-  // Look-ahead curtain: none, one beat, two beats.
   let maskBeats = cfg.mask ?? 0;
-  const maskLabel = () => (maskBeats ? `Cache : ${maskBeats} temps` : 'Cache');
-  const maskBtn = button(maskLabel(), `btn toggle${maskBeats ? ' on' : ''}`, () => {
-    maskBeats = (maskBeats + 1) % 3;
-    maskBtn.textContent = maskLabel();
-    maskBtn.classList.toggle('on', maskBeats > 0);
-    if (view.dataset.phase === 'play' && maskBeats < (cfg.mask ?? 0)) {
-      assisted = true;
-      assistedNote.hidden = false;
-    }
-    applyMask();
-  });
-  maskBtn.title = 'Cache les notes juste avant qu’elles soient jouées : il faut les lire en avance.';
-  tools.append(namesBtn, maskBtn, assistedNote);
-  let metroBtn: HTMLButtonElement | null = null;
-  if (mode === 'rhythm') {
-    metroBtn = button('Métronome', `btn toggle${app.settings.metronome ? ' on' : ''}`, () => {
-      app.setSettings({ ...app.settings, metronome: !app.settings.metronome });
-      metroBtn!.classList.toggle('on', app.settings.metronome);
-    });
-    tools.append(metroBtn, button('Recommencer', 'btn', () => restart()));
-  }
-  const source = h('span', 'source');
-  tools.append(source, navSlot, h('span', 'portrait-hint', 'Astuce : tourne l’écran en paysage.'));
+  const isAssisted = () => showNames || maskBeats < (cfg.mask ?? 0);
+  // Bottom bar: what's said in wait mode, then start over and Retour, bottom-right.
+  const tools = h('div', 'tools');
+  const restartBtn = button('↻', 'btn icon', () => restart());
+  restartBtn.setAttribute('aria-label', 'Recommencer');
+  restartBtn.title = 'Recommencer';
+  const back = button('Retour', 'btn back', cfg.onExit);
+  tools.append(feedback, restartBtn, back);
   const kbdSlot = h('div', 'kbd-slot');
   // The intro/results card covers only the score area, so the toolbar
   // (with Retour) and the on-screen keys stay usable underneath.
   const body = h('div', 'ex-body');
-  body.append(stage, feedback);
-  view.append(body, tools, kbdSlot);
+  body.append(stage);
+  view.append(body, tools, h('div', 'portrait-hint', 'Astuce : tourne l’écran en paysage.'), kbdSlot);
 
   // ---------- intro ----------
   const overlay = h('div', 'overlay');
@@ -181,15 +246,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     for (const p of cfg.intro.paragraphs) card.append(h('p', undefined, p));
     if (cfg.intro.setup) card.append(h('p', 'setup', `🖐 ${cfg.intro.setup}`));
     if (cfg.intro.criteria) card.append(h('p', 'rules', cfg.intro.criteria));
-    if (mode === 'rhythm') {
-      // The colour language of the whole exercise, said once.
-      const key = h('div', 'timing-key');
-      key.append(h('span', 'k-ok', 'juste'), h('span', 'k-early', 'trop tôt'), h('span', 'k-late', 'trop tard'));
-      card.append(
-        key,
-        h('p', 'hint', 'Sous le curseur, chaque appui (↓) et chaque relâché (↑) laisse un point : au centre c’est juste, à gauche trop tôt, à droite trop tard. Les notes prennent la même couleur.')
-      );
-    }
+    if (mode === 'rhythm') card.append(legend(score.staves > 1));
     if (mode === 'rhythm') {
       const row = h('div', 'tempo-row');
       const val = h('span', 'tempo-val');
@@ -216,12 +273,49 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
       if (!app.settings.calibrated && app.midi.connected) {
         card.append(h('p', 'note', 'Piano en Bluetooth ? Calibre la latence une fois (Réglages) pour un jugement du rythme plus juste.'));
       }
-      card.append(button('C’est parti', 'btn primary big', () => start()));
+      card.append(options(), button('C’est parti', 'btn primary big', () => start()));
     } else {
-      card.append(button('C’est parti', 'btn primary big', () => start()), h('p', 'hint', 'ou joue n’importe quelle note pour commencer'));
+      card.append(options(), button('C’est parti', 'btn primary big', () => start()), h('p', 'hint', 'ou joue n’importe quelle note pour commencer'));
     }
     card.append(button('📖 Un mot inconnu ? Lexique FR ↔ EN', 'btn quiet small lex-link', () => app.go('#/lexique')));
     return card;
+  };
+  /** The settings of the run, as toggles on the intro card. */
+  const options = () => {
+    const row = h('div', 'ex-options');
+    const note = h('span', 'assisted', 'séance non comptée');
+    const sync = () => {
+      note.hidden = !isAssisted();
+    };
+    const toggle = (label: () => string, on: () => boolean, flip: () => void, title?: string) => {
+      const b = button(label(), `btn toggle${on() ? ' on' : ''}`, () => {
+        flip();
+        b.textContent = label();
+        b.classList.toggle('on', on());
+        sync();
+      });
+      if (title) b.title = title;
+      row.append(b);
+    };
+    toggle(() => 'Noms des notes', () => showNames, () => {
+      showNames = !showNames;
+      sv.setOptions({ names: showNames });
+    });
+    toggle(
+      () => (maskBeats ? `Cache : ${maskBeats} temps` : 'Cache'),
+      () => maskBeats > 0,
+      () => {
+        maskBeats = (maskBeats + 1) % 3;
+        applyMask();
+      },
+      'Cache les notes juste avant qu’elles soient jouées : il faut les lire en avance.'
+    );
+    if (mode === 'rhythm') {
+      toggle(() => 'Métronome', () => app.settings.metronome, () => app.setSettings({ ...app.settings, metronome: !app.settings.metronome }));
+    }
+    row.append(themeButton(app), note);
+    sync();
+    return row;
   };
   show(introCard());
   root.append(view);
@@ -238,9 +332,13 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     fingers: cfg.fingers !== false,
     marks,
     labels,
-    holdFlags
+    holdFlags,
+    ghosts,
+    // Room above and below the staves for the timing lanes.
+    margin: mode === 'rhythm' ? LANE_H + 6 : 0
   });
-  const meter = mode === 'rhythm' ? new TimingMeter(stage) : null;
+  const hands = score.staves > 1 ? 2 : 1;
+  const meter = mode === 'rhythm' ? new TimingMeter(stage, hands) : null;
   const lastBeat = mode === 'rhythm' ? Math.max(...buildTargets(score).map((t) => t.beat)) : 0;
   /** Rhythm mode: the last note's written end, so a final long note is held to the end. */
   const lastEnd = mode === 'rhythm' ? Math.max(...buildTargets(score).map((t) => t.note.tieEnd)) : 0;
@@ -261,10 +359,8 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
   let t0 = 0;
   let msPerBeat = 1000;
   let judged = 0;
-  /** Dynamic in force for each bar; the bar where the last live report was given. */
+  /** Dynamic in force for each bar. */
   const dynOf = dynamicsByMeasure(score);
-  const hasDyn = dynOf.some((d) => d);
-  let dynSection = -1;
   let sawVelocity = false;
   let sawRelease = false;
 
@@ -283,12 +379,23 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
   const setCount = (text: string) => {
     if (count.textContent !== text) count.textContent = text;
   };
+  let shownProgress = -1;
+  const setProgress = (f: number) => {
+    const v = Math.round(Math.max(0, Math.min(1, f)) * 200) / 200;
+    if (v === shownProgress) return;
+    shownProgress = v;
+    progressFill.style.transform = `scaleX(${v})`;
+  };
+  const setCountIn = (text: string) => {
+    if (countIn.textContent !== text) countIn.textContent = text;
+  };
 
   const markCurrent = () => {
     const st = wait?.current;
     view.dataset.expected = st ? st.midis.join(',') : '';
     if (st) for (const n of st.notes) setMark(n, 'current');
     setCount(`${wait?.results.length ?? 0} / ${steps.length}`);
+    setProgress((wait?.results.length ?? 0) / Math.max(1, steps.length));
   };
 
   const start = () => {
@@ -297,8 +404,8 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     view.dataset.phase = 'play';
     finished = false;
     clearMarks();
-    assisted = showNames;
-    assistedNote.hidden = !assisted;
+    assisted = isAssisted();
+    setProgress(0);
     releaseWake ??= keepAwake();
     if (mode === 'wait') {
       wait = new WaitSession(steps, performance.now());
@@ -334,7 +441,6 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
       setCount(`${bpm} bpm`);
       judged = 0;
       applyMask();
-      dynSection = -1;
     }
     sawVelocity = false;
     sawRelease = false;
@@ -352,6 +458,8 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     viewBeat = mode === 'wait' ? steps[0]?.beat ?? 0 : -2;
     sv.place(viewBeat, false);
     setFeedback('');
+    setCountIn('');
+    setProgress(0);
     show(introCard());
   };
 
@@ -405,7 +513,17 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
         stoppedEarly
       };
     }
-    cfg.onFinish(outcome, show, restart);
+    // Two hands at tempo: the card also says how each hand did, side by side.
+    const recap = mode === 'rhythm' && rhythm && hands > 1 ? handsRecap(rhythm.targets, msPerBeat, lastOfStaff, sawRelease) : null;
+    const showCard = (card: HTMLElement) => {
+      if (recap && card.classList.contains('results') && !card.querySelector('.hands')) {
+        const at = card.querySelector('.stats');
+        if (at) at.after(recap);
+        else card.querySelector('h2')?.after(recap);
+      }
+      show(card);
+    };
+    cfg.onFinish(outcome, showCard, restart);
   };
 
   // ---------- input ----------
@@ -421,23 +539,11 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
           holding.delete(e.midi);
           const n = t.note;
           const verdict = holdVerdict(n.beat, n.tieEnd, beat, msPerBeat, !lastOfStaff.has(t));
-          // On the meter, in tolerance units: ±1 is the edge of "held right".
-          const lenMs = (n.tieEnd - n.beat) * msPerBeat;
-          const eMs = (beat - n.tieEnd) * msPerBeat;
-          const tol = eMs < 0 ? Math.max(HOLD_SLACK.share * lenMs, HOLD_SLACK.minMs) : Math.max(LONG_SLACK.share * lenMs, LONG_SLACK.minMs);
-          meter?.add('release', lastOfStaff.has(t) && eMs > 0 ? 0 : eMs / tol);
+          // Drawn on the note's stem: blue = let go too soon, orange = held into the next note.
           if (verdict !== 'ok') {
             holdFlags.set(n, verdict);
             sv.invalidateNotes([n]);
-            const len = n.tieEnd - n.beat;
-            setFeedback(
-              verdict === 'short'
-                ? beat - n.beat < 0.2
-                  ? `Trop court : relâchée tout de suite, il fallait ${beatsText(len)}`
-                  : `Trop court : tenue ${beatsText(beat - n.beat)} sur ${beatsText(len)}`
-                : `Trop long : déborde de ${beatsText(beat - n.tieEnd)} sur la note suivante`,
-              verdict === 'short' ? 'early' : 'late'
-            );
+            view.dataset[verdict] = String([...holdFlags.values()].filter((v) => v === verdict).length);
           }
         }
       }
@@ -454,6 +560,10 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
       const fb = wait.noteOn(e.midi, e.time, app.bus.held, e.velocity);
       if (fb.kind === 'wrong') {
         for (const n of step.notes) setMark(n, 'bad');
+        // The key pressed, drawn where it sits, beside the nearest written note of the step.
+        const near = step.notes.reduce((a, n) => (Math.abs(n.midi - fb.played) < Math.abs(a.midi - fb.played) ? n : a));
+        for (const n of step.notes) ghosts.delete(n);
+        ghosts.set(near, fb.played);
         window.clearTimeout(badTimer);
         badTimer = window.setTimeout(() => {
           if (wait?.current === step) {
@@ -473,6 +583,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
         setFeedback('…et l’autre note en même temps.');
       } else if (fb.kind === 'correct') {
         window.clearTimeout(badTimer);
+        for (const n of step.notes) ghosts.delete(n);
         const clean = fb.result.wrong.length === 0;
         for (const n of step.notes) setMark(n, clean ? 'ok' : 'late');
         setFeedback(clean ? '✓' : '✓ Trouvé.', clean ? 'good' : '');
@@ -491,10 +602,10 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
         holding.set(e.midi, hit.target);
         const early = hit.dtMs < 0;
         setMark(hit.target.note, hit.grade === 'perfect' ? 'ok' : early ? 'early' : 'late');
-        meter?.add('attack', hit.dtMs / WINDOWS.perfect);
-        setFeedback(hit.grade === 'perfect' ? '✓' : early ? 'un peu tôt' : 'un peu tard', hit.grade === 'perfect' ? 'good' : early ? 'early' : 'late');
-          } else if (hit.kind === 'wrong') {
-        setFeedback(`✗ ${nameOf(hit.played)} au lieu de ${hit.near ? nameOf(hit.near.midi) : '?'}`, 'bad');
+        meter?.add(hit.target.note.staff, hit.dtMs / WINDOWS.perfect);
+      } else if (hit.kind === 'wrong' && hit.near) {
+        ghosts.set(hit.near.note, hit.played);
+        setMark(hit.near.note, 'bad');
       }
     }
   });
@@ -531,30 +642,22 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
   const resize = () => {
     const r = stage.getBoundingClientRect();
     if (r.width > 0 && r.height > 0) sv.resize(r.width, r.height);
-    // The meter sits under the cursor, below the labels of the lowest staff.
     const cp = sv.cursorPoint();
-    if (meter && cp) meter.place(cp.x, cp.below + (score.staves > 1 ? 2.6 : 2.1) * cp.SP, r.height - 62);
+    if (cp) {
+      countIn.style.left = `${cp.x}px`;
+      countIn.style.top = `${(cp.staffTop[0] + cp.below) / 2}px`;
+    }
+    // Right hand's lane above the treble staff, left hand's under the bass staff.
+    if (meter && cp) {
+      const clamp = (y: number) => Math.max(LANE_H / 2 + 2, Math.min(r.height - LANE_H / 2 - 2, y));
+      const off = 1.5 * cp.SP + LANE_H / 2;
+      const ys = hands > 1 ? [clamp(cp.staffTop[0] - off), clamp(cp.staffBottom[1] + off)] : [clamp(cp.staffTop[0] - off)];
+      meter.place(cp.x, ys);
+    }
   };
   const ro = new ResizeObserver(resize);
   ro.observe(stage);
 
-
-  /** Rhythm mode with dynamics: when a new marking starts, say how loud the last section was. */
-  const reportDynamics = (beat: number) => {
-    if (beat < 0) return;
-    const mi = measureAt(score, beat);
-    let start = mi;
-    while (start > 0 && !score.measures[start].dynamic) start--;
-    if (start === dynSection) return;
-    const prev = dynSection;
-    dynSection = start;
-    if (prev < 0 || !rhythm) return;
-    const d = dynOf[prev];
-    const vs = rhythm.targets.filter((t) => t.velocity && measureAt(score, t.note.beat) >= prev && measureAt(score, t.note.beat) < start).map((t) => t.velocity!);
-    if (!d || !vs.length) return;
-    const avg = Math.round(vs.reduce((a, b) => a + b, 0) / vs.length);
-    setFeedback(`${d === 'p' ? 'piano' : 'forte'} : ${avg} / 127`, '');
-  };
 
   const frame = () => {
     raf = requestAnimationFrame(frame);
@@ -569,14 +672,15 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
       const now = performance.now();
       clicks?.pump(now, app.settings.metronome);
       viewBeat = (now - t0) / msPerBeat;
-      if (viewBeat < 0) setFeedback(`${Math.ceil(-viewBeat)}…`);
+      // The start is set a hair after the count-in bar: don't show a fifth beat.
+      const left = Math.ceil(-viewBeat - 0.2);
+      setCountIn(left > 0 ? String(left) : '');
       for (const t of rhythm.tick(viewBeat - app.settings.latencyMs / msPerBeat)) {
         judged++;
         setMark(t.note, 'bad');
-        setFeedback('raté', 'bad');
       }
       setCount(`${judged} / ${rhythm.targets.length}`);
-      if (hasDyn && sawVelocity) reportDynamics(viewBeat);
+      setProgress(viewBeat / Math.max(1, lastEnd));
       if (viewBeat > Math.max(lastBeat + WINDOWS.max / msPerBeat + 1.5, lastEnd + 0.25)) finish(false);
     }
     // Only repaints of changed notes here; the movement itself is done by the compositor.

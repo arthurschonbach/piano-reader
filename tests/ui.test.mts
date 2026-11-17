@@ -162,11 +162,12 @@ const startExercise = async (page: Page) => {
   ok(!!rr && rr.includes('Séance validée'), `rhythm lesson validated when played in time (${rr?.slice(0, 80)})`);
   ok(!!rr && rr.includes('notes tenues jusqu’au bout'), 'rhythm: held notes reported');
   const meter = (await page.evaluate(`(() => {
-    const m = document.querySelector('.meter');
-    const dots = (lane) => [...m.querySelectorAll('.meter-row.' + lane + ' .meter-dot')].map((d) => d.className.replace('meter-dot ', '').replace(' last', ''));
-    return { shown: !m.hidden, attack: dots('attack'), release: dots('release') };
-  })()`)) as { shown: boolean; attack: string[]; release: string[] };
-  ok(meter.shown && meter.attack.length > 0 && meter.release.length > 0 && [...meter.attack, ...meter.release].every((c) => c === 'ok'), `meter: played in time, every dot in the green (${JSON.stringify(meter)})`);
+    const lanes = [...document.querySelectorAll('.stage .meter')];
+    const dots = lanes.flatMap((m) => [...m.querySelectorAll('.meter-dot')].map((d) => d.className.replace('meter-dot ', '').replace(' last', '')));
+    return { lanes: lanes.length, shown: lanes.every((m) => !m.hidden), dots };
+  })()`)) as { lanes: number; shown: boolean; dots: string[] };
+  ok(meter.lanes >= 1 && meter.shown && meter.dots.length > 0 && meter.dots.every((c) => c === 'ok'), `meter: played in time, every dot in the green (${JSON.stringify(meter)})`);
+  ok(meter.lanes === 1 && (await page.locator('.results .hands').count()) === 0, 'rhythm, one staff: one timing lane, no per-hand recap');
 
   // Piano and forte, played soft and loud where marked.
   await page.goto('http://localhost:5199/#/lecon/piano-forte');
@@ -178,17 +179,23 @@ const startExercise = async (page: Page) => {
 
   // Reading ahead: a curtain hides the beat in front of the cursor.
   await page.goto('http://localhost:5199/#/lecon/lire-en-avance');
+  await page.waitForSelector('.ex');
+  // The run's options sit on the intro card, before playing.
+  const label = await page.evaluate(`[...document.querySelectorAll('.ex-options .btn')].map((b) => b.textContent).find((t) => t.startsWith('Cache'))`);
+  ok(label === 'Cache : 1 temps', `look-ahead: curtain on by default (${label})`);
   await startExercise(page);
   const curtain = (await page.evaluate(`(() => {
     const m = document.querySelector('.strip-mask');
     const r = m.getBoundingClientRect();
-    return { hidden: m.hidden, w: r.width, label: [...document.querySelectorAll('.tools .btn')].map((b) => b.textContent).find((t) => t.startsWith('Cache')) };
-  })()`)) as { hidden: boolean; w: number; label: string };
-  ok(!curtain.hidden && curtain.w > 20 && curtain.label === 'Cache : 1 temps', `look-ahead: curtain shown (${JSON.stringify(curtain)})`);
-  await page.click('.tools .btn:has-text("Cache")'); // 2 beats: harder, still counted
+    return { hidden: m.hidden, w: r.width };
+  })()`)) as { hidden: boolean; w: number };
+  ok(!curtain.hidden && curtain.w > 20, `look-ahead: curtain shown (${JSON.stringify(curtain)})`);
+  await page.click('.tools .btn[aria-label="Recommencer"]');
+  await page.click('.ex-options .btn:has-text("Cache")'); // 2 beats: harder, still counted
   ok(!(await page.isVisible('.assisted')), 'look-ahead: a bigger curtain keeps the session counted');
-  await page.click('.tools .btn:has-text("Cache")'); // off
+  await page.click('.ex-options .btn:has-text("Cache")'); // off
   ok(await page.isVisible('.assisted'), 'look-ahead: removing the curtain marks the session as not counted');
+  await startExercise(page);
   ok(await page.evaluate(`document.querySelector('.strip-mask').hidden`), 'look-ahead: curtain removed');
 
   // Technique: a scale played in time is a clean run, and the tempo goes up.
@@ -205,12 +212,12 @@ const startExercise = async (page: Page) => {
   await page.goto('http://localhost:5199/#/lecon/en-rythme');
   await startExercise(page);
   await page.evaluate(() => (window as unknown as { __playEarly: () => void }).__playEarly());
-  await page.waitForFunction(() => document.querySelector('.feedback')?.textContent?.startsWith('Trop court'), null, { timeout: 30000 });
-  ok(true, `hold: early release told while playing (${await page.textContent('.feedback')})`);
-  ok((await page.locator('.meter-row.release .meter-dot.early').count()) > 0, 'meter: notes let go early show as blue dots on the ↑ lane');
+  await page.waitForFunction(() => Number((document.querySelector('.ex') as HTMLElement | null)?.dataset.short ?? 0) > 0, null, { timeout: 30000 });
+  ok(true, 'hold: early release shown on the note while playing');
+  ok(!(await page.textContent('.tools .feedback'))?.trim(), 'rhythm: nothing to read while playing');
   await page.waitForSelector('.results', { timeout: 60000 });
   const er2 = await page.textContent('.results');
-  ok(!!er2 && er2.includes('Notes lâchées trop tôt'), 'hold: early releases listed in the results');
+  ok(!!er2 && er2.includes('Notes lâchées trop tôt'), `hold: early releases listed in the results (${er2?.slice(0, 300)})`);
 
   // Advanced rhythm: tied notes held across the barline, and 6/8, played in time.
   for (const id of ['liaisons', 'six-huit']) {
