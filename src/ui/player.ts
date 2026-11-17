@@ -2,7 +2,8 @@ import { ClickTrack } from '../core/audio';
 import type { HoldFlag, Mark } from '../core/engraver';
 import { ScrollStrip } from '../core/scroller';
 import { dynamicsByMeasure, measureAt, noteName, spellOfMidi, type NoteItem, type Score } from '../core/model';
-import { holdVerdict, summarizeTouch, type TouchNote, type TouchSummary } from '../exercise/touch';
+import { HOLD_SLACK, holdVerdict, LONG_SLACK, summarizeTouch, type TouchNote, type TouchSummary } from '../exercise/touch';
+import { TimingMeter } from './meter';
 import { buildSteps, summarize, WaitSession, type StepResult, type Summary } from '../exercise/wait';
 import { buildTargets, RhythmSession, summarizeRhythm, WINDOWS, type RhythmSummary, type Target } from '../exercise/rhythm';
 import { mountKeyboard } from '../input/keyboard';
@@ -181,6 +182,15 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     if (cfg.intro.setup) card.append(h('p', 'setup', `🖐 ${cfg.intro.setup}`));
     if (cfg.intro.criteria) card.append(h('p', 'rules', cfg.intro.criteria));
     if (mode === 'rhythm') {
+      // The colour language of the whole exercise, said once.
+      const key = h('div', 'timing-key');
+      key.append(h('span', 'k-ok', 'juste'), h('span', 'k-early', 'trop tôt'), h('span', 'k-late', 'trop tard'));
+      card.append(
+        key,
+        h('p', 'hint', 'Sous le curseur, chaque appui (↓) et chaque relâché (↑) laisse un point : au centre c’est juste, à gauche trop tôt, à droite trop tard. Les notes prennent la même couleur.')
+      );
+    }
+    if (mode === 'rhythm') {
       const row = h('div', 'tempo-row');
       const val = h('span', 'tempo-val');
       const sync = () => {
@@ -230,6 +240,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     labels,
     holdFlags
   });
+  const meter = mode === 'rhythm' ? new TimingMeter(stage) : null;
   const lastBeat = mode === 'rhythm' ? Math.max(...buildTargets(score).map((t) => t.beat)) : 0;
   /** Rhythm mode: the last note's written end, so a final long note is held to the end. */
   const lastEnd = mode === 'rhythm' ? Math.max(...buildTargets(score).map((t) => t.note.tieEnd)) : 0;
@@ -265,7 +276,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
 
   // Touch the DOM only when something changes: a write per frame forces style
   // and layout work that steals time from the score animation.
-  const setFeedback = (text: string, tone: '' | 'good' | 'bad' = '') => {
+  const setFeedback = (text: string, tone: '' | 'good' | 'bad' | 'early' | 'late' = '') => {
     if (feedback.textContent !== text) feedback.textContent = text;
     if (feedback.dataset.tone !== tone) feedback.dataset.tone = tone;
   };
@@ -335,6 +346,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     clicks = null;
     wait = null;
     clearMarks();
+    meter?.clear();
     applyMask();
     sv.peek(false);
     viewBeat = mode === 'wait' ? steps[0]?.beat ?? 0 : -2;
@@ -409,15 +421,22 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
           holding.delete(e.midi);
           const n = t.note;
           const verdict = holdVerdict(n.beat, n.tieEnd, beat, msPerBeat, !lastOfStaff.has(t));
+          // On the meter, in tolerance units: ±1 is the edge of "held right".
+          const lenMs = (n.tieEnd - n.beat) * msPerBeat;
+          const eMs = (beat - n.tieEnd) * msPerBeat;
+          const tol = eMs < 0 ? Math.max(HOLD_SLACK.share * lenMs, HOLD_SLACK.minMs) : Math.max(LONG_SLACK.share * lenMs, LONG_SLACK.minMs);
+          meter?.add('release', lastOfStaff.has(t) && eMs > 0 ? 0 : eMs / tol);
           if (verdict !== 'ok') {
             holdFlags.set(n, verdict);
             sv.invalidateNotes([n]);
             const len = n.tieEnd - n.beat;
             setFeedback(
               verdict === 'short'
-                ? `Trop court : tenue ${beatsText(beat - n.beat)} sur ${beatsText(len)}`
+                ? beat - n.beat < 0.2
+                  ? `Trop court : relâchée tout de suite, il fallait ${beatsText(len)}`
+                  : `Trop court : tenue ${beatsText(beat - n.beat)} sur ${beatsText(len)}`
                 : `Trop long : déborde de ${beatsText(beat - n.tieEnd)} sur la note suivante`,
-              'bad'
+              verdict === 'short' ? 'early' : 'late'
             );
           }
         }
@@ -470,9 +489,10 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
       if (hit.kind === 'hit') {
         judged++;
         holding.set(e.midi, hit.target);
-        setMark(hit.target.note, hit.grade === 'perfect' ? 'ok' : 'late');
-        const a = Math.round(hit.dtMs);
-        setFeedback(hit.grade === 'perfect' ? '✓' : a < 0 ? 'un peu en avance' : 'un peu en retard', hit.grade === 'perfect' ? 'good' : '');
+        const early = hit.dtMs < 0;
+        setMark(hit.target.note, hit.grade === 'perfect' ? 'ok' : early ? 'early' : 'late');
+        meter?.add('attack', hit.dtMs / WINDOWS.perfect);
+        setFeedback(hit.grade === 'perfect' ? '✓' : early ? 'un peu tôt' : 'un peu tard', hit.grade === 'perfect' ? 'good' : early ? 'early' : 'late');
           } else if (hit.kind === 'wrong') {
         setFeedback(`✗ ${nameOf(hit.played)} au lieu de ${hit.near ? nameOf(hit.near.midi) : '?'}`, 'bad');
       }
@@ -511,6 +531,9 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
   const resize = () => {
     const r = stage.getBoundingClientRect();
     if (r.width > 0 && r.height > 0) sv.resize(r.width, r.height);
+    // The meter sits under the cursor, below the labels of the lowest staff.
+    const cp = sv.cursorPoint();
+    if (meter && cp) meter.place(cp.x, cp.below + (score.staves > 1 ? 2.6 : 2.1) * cp.SP, r.height - 62);
   };
   const ro = new ResizeObserver(resize);
   ro.observe(stage);
@@ -573,6 +596,7 @@ export function mountPlayer(root: HTMLElement, app: App, cfg: PlayConfig): () =>
     releaseWake?.();
     document.removeEventListener('visibilitychange', onVisible);
     sv.destroy();
+    meter?.destroy();
     view.remove();
   };
 }

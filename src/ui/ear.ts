@@ -19,13 +19,17 @@ import { nameOf } from './player';
 const NOTE_MS = 650;
 const CHORD_MS = 1100;
 
+/** Where the phrases are heard: the piano itself when chosen and reachable. */
+export const playsOnPiano = (app: App): boolean => app.settings.earOnPiano && app.midi.canPlay;
+
 /** Play notes (one entry per beat); returns when the sound is over (ms from now). */
-function playBeats(app: App, beats: number[][], beatMs: number, startIn = 120): number {
+export function playBeats(app: App, beats: number[][], beatMs: number, startIn = 120): number {
   const t0 = performance.now() + startIn;
+  const piano = playsOnPiano(app);
   beats.forEach((ms, i) => {
     for (const m of ms) {
       const at = t0 + i * beatMs;
-      if (!(app.midi.canPlay && app.midi.playNote(m, at, beatMs * 0.92, ms.length > 1 ? 52 : 64))) app.metronome.tone(m, at, beatMs * 0.92, ms.length > 1 ? 0.35 : 0.55);
+      if (!(piano && app.midi.playNote(m, at, beatMs * 0.92, ms.length > 1 ? 52 : 64))) app.metronome.tone(m, at, beatMs * 0.92, ms.length > 1 ? 0.35 : 0.55);
     }
   });
   return startIn + beats.length * beatMs;
@@ -175,8 +179,34 @@ export function renderEar(root: HTMLElement, app: App, hooks: Hooks): () => void
       undefined,
       `Écoute la phrase, puis rejoue-la au piano. Une fausse note renvoie au début de la phrase : réécoute autant que tu veux. Après ${EAR_REVEAL_AFTER} essais ratés, la réponse s’affiche. ${EAR_ITEMS} dictées par série.`
     ),
-    h('p', 'setup', app.midi.canPlay ? '🎹 Le piano joue lui-même les phrases : monte un peu son volume.' : '🔊 Le son sort de cet appareil : monte le volume.')
   );
+  // Where the sound comes from, with a test and a switch (the piano may not accept notes over Bluetooth).
+  const source = h('p', 'setup');
+  const soundRow = h('div', 'actions');
+  const drawSource = () => {
+    source.textContent = playsOnPiano(app)
+      ? '🎹 Le piano joue lui-même les phrases. Fais « Tester le son » : si le piano reste muet, passe au son du téléphone.'
+      : app.settings.earOnPiano && app.midi.connected
+        ? '🔊 Aucune sortie MIDI vers le piano : le son sort du téléphone. Monte le volume.'
+        : '🔊 Le son sort de cet appareil : monte le volume.';
+    soundRow.innerHTML = '';
+    soundRow.append(
+      button('Tester le son', 'btn', () => {
+        app.metronome.unlock();
+        playBeats(app, [[60], [64], [67], [72]], 380);
+      })
+    );
+    if (app.midi.canPlay) {
+      soundRow.append(
+        button(app.settings.earOnPiano ? 'Utiliser le son du téléphone' : 'Utiliser le son du piano', 'btn quiet', () => {
+          app.setSettings({ ...app.settings, earOnPiano: !app.settings.earOnPiano });
+          drawSource();
+        })
+      );
+    }
+  };
+  drawSource();
+  intro.append(source, soundRow);
   intro.append(
     button('C’est parti', 'btn primary big', () => {
       app.metronome.unlock();
@@ -219,6 +249,7 @@ export function renderEar(root: HTMLElement, app: App, hooks: Hooks): () => void
   return () => {
     for (const t of timers) window.clearTimeout(t);
     timers = [];
+    app.midi.stopNotes();
     offBus();
     unmountKbd?.();
     release();

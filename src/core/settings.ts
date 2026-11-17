@@ -9,10 +9,12 @@ export interface Settings {
   /** Latency was measured at least once. */
   calibrated: boolean;
   metronome: boolean;
+  /** Ear training: play the phrases on the piano (MIDI) rather than on this device. */
+  earOnPiano: boolean;
 }
 
 const KEY = 'piano-reader:settings:v1';
-const DEFAULTS: Settings = { theme: 'auto', latencyMs: 0, calibrated: false, metronome: true };
+const DEFAULTS: Settings = { theme: 'auto', latencyMs: 0, calibrated: false, metronome: true, earOnPiano: true };
 
 export function loadSettings(): Settings {
   try {
@@ -22,7 +24,8 @@ export function loadSettings(): Settings {
       theme: s.theme === 'light' || s.theme === 'dark' ? s.theme : 'auto',
       latencyMs: typeof s.latencyMs === 'number' && Number.isFinite(s.latencyMs) ? Math.max(-300, Math.min(400, s.latencyMs)) : 0,
       calibrated: s.calibrated ?? false,
-      metronome: s.metronome ?? DEFAULTS.metronome
+      metronome: s.metronome ?? DEFAULTS.metronome,
+      earOnPiano: s.earOnPiano ?? DEFAULTS.earOnPiano
     };
   } catch {
     return { ...DEFAULTS };

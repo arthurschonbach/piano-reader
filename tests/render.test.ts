@@ -22,9 +22,9 @@ const ctx = canvas.getContext('2d');
 const renderer = new ScoreRenderer(canvas as unknown as HTMLCanvasElement);
 renderer.resize(W, H);
 
-function stats(): { ink: number; green: number; orange: number; red: number; dark: number; light: number } {
+function stats(): { ink: number; green: number; orange: number; red: number; blue: number; dark: number; light: number } {
   const d = ctx.getImageData(0, 0, W, H).data;
-  let ink = 0, green = 0, orange = 0, red = 0, dark = 0, light = 0;
+  let ink = 0, green = 0, orange = 0, red = 0, blue = 0, dark = 0, light = 0;
   const bg = [d[0], d[1], d[2]];
   for (let i = 0; i < d.length; i += 4) {
     const [r, g, b] = [d[i], d[i + 1], d[i + 2]];
@@ -36,9 +36,10 @@ function stats(): { ink: number; green: number; orange: number; red: number; dar
     if (g > r + 30 && g > b + 15) green++;
     if (r > 190 && g > 110 && g < 175 && b < 80) orange++;
     if (r > 190 && g < 110 && b < 110) red++;
+    if (b > 170 && b > r + 60 && b > g + 30) blue++;
   }
   const n = d.length / 4;
-  return { ink: ink / n, green: green / n, orange: orange / n, red: red / n, dark: dark / n, light: light / n };
+  return { ink: ink / n, green: green / n, orange: orange / n, red: red / n, blue: blue / n, dark: dark / n, light: light / n };
 }
 
 const draw = (score: Score, beat: number, marks?: Map<NoteItem, Mark>, extra: Record<string, unknown> = {}) =>
@@ -76,10 +77,13 @@ draw(held, 0, undefined, { pxPerBeat: 9 });
 const noFlags = stats();
 draw(held, 0, undefined, { pxPerBeat: 9, holdFlags: new Map([[firstNotes[0], 'short' as const]]) });
 const shortFlag = stats();
-ok(shortFlag.red > noFlags.red + 0.0005, `"court" label in red (${(shortFlag.red * 100).toFixed(2)}%)`);
+ok(shortFlag.blue > noFlags.blue + 0.0005, `"court" label in blue, like everything too soon (${(shortFlag.blue * 100).toFixed(2)}%)`);
 writeFileSync(new URL('./out-holds.png', import.meta.url), canvas.toBuffer('image/png'));
 draw(held, 0, undefined, { pxPerBeat: 9, holdFlags: new Map([[firstNotes[0], 'long' as const]]) });
-ok(stats().orange > noFlags.orange + 0.0005, '"long" label in amber');
+ok(stats().orange > noFlags.orange + 0.0005, '"long" label in orange, like everything too late');
+const early = new Map([[firstNotes[0], 'early' as const]]);
+draw(held, 0, early, { pxPerBeat: 9 });
+ok(stats().blue > noFlags.blue + 0.0002, 'note played early turns blue');
 
 const piece = pieceScore(PIECES[2], 'both');
 draw(piece, 0, undefined, { fingers: false });

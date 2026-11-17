@@ -364,6 +364,30 @@ export function renderSettings(root: HTMLElement, app: App): () => void {
   page.append(latText, h('p', 'hint', 'Vérifie d’abord le son. Pour calibrer : 4 clics d’amorce, puis joue n’importe quelle touche du piano en même temps que chacun des 8 clics suivants.'), btns, soundMsg, calBox);
 
   // Transfer.
+  // ---- piano sound (ear training plays notes on the piano over MIDI)
+  page.append(h('h2', 'sect', 'Son du piano'));
+  const outText = h('p', 'note');
+  const drawOuts = () => {
+    const names = app.midi.outputNames;
+    outText.textContent = !app.midi.connected
+      ? 'Piano non connecté.'
+      : names.length
+        ? `Sorties MIDI trouvées : ${names.join(', ')}. L’oreille y envoie ses notes.`
+        : 'Le piano est connecté en entrée, mais aucune sortie MIDI n’est proposée par le navigateur : l’oreille utilisera le son du téléphone.';
+  };
+  drawOuts();
+  const offOuts = app.midi.onChange(drawOuts);
+  page.append(
+    outText,
+    button('Jouer un accord sur le piano', 'btn', () => {
+      app.metronome.unlock();
+      const now = performance.now();
+      const sent = [60, 64, 67].map((m, i) => app.midi.playNote(m, now + 100 + i * 250, 900, 70)).some(Boolean);
+      outText.textContent = sent ? 'Notes envoyées (C, E, G). Si le piano reste muet, il n’accepte pas les notes par cette connexion : choisis le son du téléphone dans l’oreille.' : 'Aucune sortie MIDI : rien à envoyer.';
+    }),
+    h('p', 'hint', 'Monte le volume du piano. Avec le Bluetooth (MIDI BLE Connect), toutes les configurations ne laissent pas passer les notes vers le piano.')
+  );
+
   page.append(h('h2', 'sect', 'Transférer ma progression'));
   page.append(h('p', 'hint', 'Ta progression est enregistrée sur cet appareil seulement. Pour la copier sur un autre (téléphone ↔ iPad) : copie le code ici, colle-le là-bas.'));
   const area = h('textarea', 'code');
@@ -410,6 +434,7 @@ export function renderSettings(root: HTMLElement, app: App): () => void {
   root.append(view);
   return () => {
     stopCal?.();
+    offOuts();
     view.remove();
   };
 }

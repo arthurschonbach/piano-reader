@@ -29,6 +29,7 @@ interface MidiOutLike {
   name?: string | null;
   state?: string;
   send(data: number[], timestamp?: number): void;
+  open?: () => Promise<unknown>;
 }
 
 interface MidiAccessLike {
@@ -51,8 +52,9 @@ function requestFn(): RequestMidi | null {
 export class MidiManager {
   status: MidiStatus;
   private access: MidiAccessLike | null = null;
-  /** The piano's MIDI input, to play notes on it (ear training). */
-  private out: MidiOutLike | null = null;
+  /** MIDI outputs, to play notes on the piano (ear training). All of them get the notes. */
+  private outs: MidiOutLike[] = [];
+  private timers = new Set<number>();
   private listeners = new Set<(s: MidiStatus) => void>();
 
   constructor(private bus: NoteBus) {
@@ -118,28 +120,61 @@ export class MidiManager {
       };
     });
     if (!devices.length) this.bus.releaseAll(performance.now());
-    this.out = null;
+    this.outs = [];
     this.access.outputs?.forEach((port) => {
-      if (!this.out && port.state !== 'disconnected' && typeof port.send === 'function') this.out = port;
+      if (port.state === 'disconnected' || typeof port.send !== 'function') return;
+      this.outs.push(port);
+      // Opening is implicit on send, but some Android stacks only deliver once opened.
+      void port.open?.().catch(() => undefined);
     });
     this.set({ state: 'ready', devices });
   }
 
-  /** True when notes can be played on the piano itself. */
+  /** True when there is somewhere to send notes to. */
   get canPlay(): boolean {
-    return this.connected && this.out !== null;
+    return this.connected && this.outs.length > 0;
+  }
+
+  /** Names of the MIDI outputs found (for the sound test in the settings). */
+  get outputNames(): string[] {
+    return this.outs.map((o) => o.name || 'Sortie MIDI');
+  }
+
+  private sendNow(data: number[]): boolean {
+    let ok = false;
+    for (const o of this.outs) {
+      try {
+        // No timestamp: some Bluetooth stacks drop messages scheduled in the future.
+        o.send(data);
+        ok = true;
+      } catch {
+        // this output refused: try the others
+      }
+    }
+    return ok;
   }
 
   /** Play a note on the piano: on at `atMs`, off `durMs` later (performance.now clock). */
   playNote(midi: number, atMs: number, durMs: number, velocity = 64): boolean {
-    if (!this.out) return false;
-    try {
-      this.out.send([0x90, midi, velocity], atMs);
-      this.out.send([0x80, midi, 0], atMs + durMs);
-      return true;
-    } catch {
-      return false;
-    }
+    if (!this.outs.length) return false;
+    const at = (ms: number, data: number[]) => {
+      const id = window.setTimeout(() => {
+        this.timers.delete(id);
+        this.sendNow(data);
+      }, Math.max(0, ms - performance.now()));
+      this.timers.add(id);
+    };
+    at(atMs, [0x90, midi, velocity]);
+    at(atMs + durMs, [0x80, midi, 0]);
+    return true;
+  }
+
+  /** Stop everything scheduled and silence the piano (leaving a screen). */
+  stopNotes(): void {
+    for (const id of this.timers) window.clearTimeout(id);
+    this.timers.clear();
+    // All notes off, channel 1.
+    this.sendNow([0xb0, 123, 0]);
   }
 
   private set(s: MidiStatus): void {

@@ -13,6 +13,9 @@ export interface Palette {
   bar: string;
   accent: string;
   good: string;
+  /** Too soon (an early attack, a key let go early): cool. */
+  early: string;
+  /** Too late (a late attack, a note held too long): warm. */
   late: string;
   bad: string;
   halo: string;
@@ -22,13 +25,13 @@ export interface Palette {
 
 export const LIGHT: Palette = {
   paper: '#fbfaf7', ink: '#201b13', played: '#cfc8bb', rest: '#8a8378', restPlayed: '#e2dccd',
-  staff: '#ddd5c4', bar: '#a89e8c', accent: '#d9481c', good: '#2e8b57', late: '#d98a1c', bad: '#d32f2f',
+  staff: '#ddd5c4', bar: '#a89e8c', accent: '#d9481c', good: '#2e8b57', early: '#2f6fd6', late: '#d98a1c', bad: '#d32f2f',
   halo: 'rgba(217,72,28,0.13)', haloBad: 'rgba(211,47,47,0.16)', labelHalo: 'rgba(251,250,247,0.92)'
 };
 
 export const DARK: Palette = {
   paper: '#1a1916', ink: '#ece6da', played: '#5c564c', rest: '#9a9284', restPlayed: '#4a463f',
-  staff: '#4a453c', bar: '#857c6d', accent: '#f0703f', good: '#4cc17f', late: '#e8a640', bad: '#f0605c',
+  staff: '#4a453c', bar: '#857c6d', accent: '#f0703f', good: '#4cc17f', early: '#6aa3ff', late: '#e8a640', bad: '#f0605c',
   halo: 'rgba(240,112,63,0.22)', haloBad: 'rgba(240,96,92,0.25)', labelHalo: 'rgba(26,25,22,0.92)'
 };
 
@@ -43,7 +46,7 @@ export function currentPalette(): Palette {
 }
 
 /** Wait-mode feedback per note: to play now, right first time, right after mistakes, wrong key just pressed. */
-export type Mark = 'current' | 'ok' | 'late' | 'bad';
+export type Mark = 'current' | 'ok' | 'early' | 'late' | 'bad';
 
 const SHARP_STEPS = [3, 0, 4, 1, 5, 2, 6];
 const FLAT_STEPS = [6, 2, 5, 1, 4, 0, 3];
@@ -201,7 +204,9 @@ function colorOf(state: number, hand: number, rest: boolean): string {
 }
 
 function clusterColor(c: Cluster, staff: number): string {
-  if (c.mark && !c.rest) return c.mark === 'current' ? P.ink : c.mark === 'ok' ? P.good : c.mark === 'late' ? P.late : P.bad;
+  if (c.mark && !c.rest) {
+    return c.mark === 'current' ? P.ink : c.mark === 'ok' ? P.good : c.mark === 'early' ? P.early : c.mark === 'late' ? P.late : P.bad;
+  }
   return colorOf(c.state, staff, c.rest);
 }
 
@@ -310,9 +315,9 @@ export class ScoreRenderer {
   }
 
   /** Staff space, left margin and spacing this renderer would use. */
-  layout(score: Score, s: DrawState): { SP: number; lead: number; pxQ: number; anchorX: number } {
+  layout(score: Score, s: DrawState): { SP: number; lead: number; pxQ: number; anchorX: number; bottom: number } {
     const g = this.geom(score, s);
-    return { SP: g.SP, lead: g.lead, pxQ: g.pxQ, anchorX: g.anchorX };
+    return { SP: g.SP, lead: g.lead, pxQ: g.pxQ, anchorX: g.anchorX, bottom: g.single ? g.trebleBottom : g.bassBottom };
   }
 
   /** Only the parts that move with the view: pinned clefs and the cursor. */
@@ -501,16 +506,11 @@ export class ScoreRenderer {
       const cur = score.measures[measureAt(score, Math.max(0, s.beat))] ?? m0;
       const clefW = Math.max(gbox('gClef', 4 * SP).w, gbox('fClef', 4 * SP).w);
       const pinW = 1.0 * SP + clefW + 0.4 * SP + Math.abs(cur.key) * 1.08 * SP + 0.9 * SP;
-      const bottom = single ? trebleBottom : bassBottom;
+      // Fully opaque and full height: a semi-transparent fade over the moving score
+      // composites a shade darker on some screens and shows as a band.
+      const edge = Math.round(pinW + 0.6 * SP);
       ctx.fillStyle = P.paper;
-      ctx.fillRect(0, trebleTop - 3 * SP, pinW, bottom - trebleTop + 6 * SP);
-      const fade = ctx.createLinearGradient(pinW, 0, pinW + 2 * SP, 0);
-      fade.addColorStop(0, P.paper);
-      const hex = P.paper.replace('#', '');
-      const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
-      fade.addColorStop(1, `rgba(${r},${g},${b},0)`);
-      ctx.fillStyle = fade;
-      ctx.fillRect(pinW, trebleTop - 3 * SP, 2 * SP, bottom - trebleTop + 6 * SP);
+      ctx.fillRect(0, 0, edge, this.h);
       ctx.strokeStyle = P.staff;
       ctx.lineWidth = 1;
       for (let st = 0; st < stCount; st++) {
@@ -518,7 +518,7 @@ export class ScoreRenderer {
           const y = staffTop[st] + l * SP;
           ctx.beginPath();
           ctx.moveTo(0, y);
-          ctx.lineTo(pinW + 2 * SP, y);
+          ctx.lineTo(edge, y);
           ctx.stroke();
         }
       }
@@ -796,7 +796,8 @@ function drawHoldFlag(ctx: CanvasRenderingContext2D, c: Cluster, flag: HoldFlag,
   const ys = c.members.map((n) => e.yIdx(idxOf(n)));
   const above = st === 0;
   const text = flag === 'short' ? 'court' : 'long';
-  const color = flag === 'short' ? P.bad : P.late;
+  // Same language as the timing colours: blue = too soon, orange = too late.
+  const color = flag === 'short' ? P.early : P.late;
   ctx.save();
   ctx.font = `700 ${0.95 * SP}px system-ui, sans-serif`;
   const tw = ctx.measureText(text).width;

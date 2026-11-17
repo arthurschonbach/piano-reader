@@ -23,7 +23,9 @@ const browser = await chromium.launch();
 /** Plain JS strings: tsx would otherwise inject helpers the page doesn't have. */
 const FAKE_MIDI = `
   const input = { id: 'fp10', name: 'FP-10', state: 'connected', onmidimessage: null };
-  const access = { inputs: new Map([['fp10', input]]), onstatechange: null };
+  window.__sent = [];
+  const output = { id: 'fp10-out', name: 'FP-10', state: 'connected', send: (d) => window.__sent.push([...d]), open: () => Promise.resolve() };
+  const access = { inputs: new Map([['fp10', input]]), outputs: new Map([['fp10-out', output]]), onstatechange: null };
   Object.defineProperty(Navigator.prototype, 'requestMIDIAccess', { value: () => Promise.resolve(access), configurable: true });
   const q = navigator.permissions.query.bind(navigator.permissions);
   navigator.permissions.query = (d) => d.name === 'midi' ? Promise.resolve({ state: 'prompt' }) : q(d);
@@ -147,6 +149,12 @@ const startExercise = async (page: Page) => {
   const rr = await page.textContent('.results');
   ok(!!rr && rr.includes('Séance validée'), `rhythm lesson validated when played in time (${rr?.slice(0, 80)})`);
   ok(!!rr && rr.includes('notes tenues jusqu’au bout'), 'rhythm: held notes reported');
+  const meter = (await page.evaluate(`(() => {
+    const m = document.querySelector('.meter');
+    const dots = (lane) => [...m.querySelectorAll('.meter-row.' + lane + ' .meter-dot')].map((d) => d.className.replace('meter-dot ', '').replace(' last', ''));
+    return { shown: !m.hidden, attack: dots('attack'), release: dots('release') };
+  })()`)) as { shown: boolean; attack: string[]; release: string[] };
+  ok(meter.shown && meter.attack.length > 0 && meter.release.length > 0 && [...meter.attack, ...meter.release].every((c) => c === 'ok'), `meter: played in time, every dot in the green (${JSON.stringify(meter)})`);
 
   // Piano and forte, played soft and loud where marked.
   await page.goto('http://localhost:5199/#/lecon/piano-forte');
@@ -187,6 +195,7 @@ const startExercise = async (page: Page) => {
   await page.evaluate(() => (window as unknown as { __playEarly: () => void }).__playEarly());
   await page.waitForFunction(() => document.querySelector('.feedback')?.textContent?.startsWith('Trop court'), null, { timeout: 30000 });
   ok(true, `hold: early release told while playing (${await page.textContent('.feedback')})`);
+  ok((await page.locator('.meter-row.release .meter-dot.early').count()) > 0, 'meter: notes let go early show as blue dots on the ↑ lane');
   await page.waitForSelector('.results', { timeout: 60000 });
   const er2 = await page.textContent('.results');
   ok(!!er2 && er2.includes('Notes lâchées trop tôt'), 'hold: early releases listed in the results');
@@ -228,6 +237,10 @@ const startExercise = async (page: Page) => {
 
   // Ear training: eight phrases played back right first time move the level up.
   await page.goto('http://localhost:5199/#/oreille');
+  await page.click('.ear button:has-text("Tester le son")');
+  await page.waitForTimeout(1800);
+  const sent = (await page.evaluate(() => (window as unknown as { __sent: number[][] }).__sent)) as number[][];
+  ok(sent.filter((d) => d[0] === 0x90).map((d) => d[1]).join() === '60,64,67,72' && sent.some((d) => d[0] === 0x80), `ear: sound test plays C-E-G-C on the piano (${JSON.stringify(sent.slice(0, 4))})`);
   await page.click('text=C’est parti');
   for (let i = 0; i < 8; i++) {
     await page.waitForFunction(() => document.querySelector('.ear-status')?.textContent?.startsWith('À toi'), null, { timeout: 15000 });

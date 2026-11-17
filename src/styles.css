@@ -11,6 +11,7 @@
   --accent-deep: #b23a13;
   --on-accent: #ffffff;
   --good: #2e8b57;
+  --early: #2f6fd6;
   --late: #c27a12;
   --bad: #d32f2f;
   --shadow: 0 8px 30px rgba(32, 27, 19, 0.08);
@@ -32,6 +33,7 @@
   --accent-deep: #ff8a5c;
   --on-accent: #1a1916;
   --good: #4cc17f;
+  --early: #6aa3ff;
   --late: #e8a640;
   --bad: #f0605c;
   --shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
@@ -182,6 +184,37 @@ button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent);
 .ear .feedback { min-height: 1.5em; }
 .ear .feedback[data-tone="good"] { color: var(--good); }
 .ear .feedback[data-tone="bad"] { color: var(--bad); }
+.feedback[data-tone="early"] { color: var(--early); }
+.feedback[data-tone="late"] { color: var(--late); }
+
+/* Timing meter under the cursor: centre = on time, left = too soon, right = too late. */
+.meter { position: absolute; z-index: 2; pointer-events: none; display: grid; gap: 7px; width: 230px; }
+.meter-row { display: grid; grid-template-columns: 16px 1fr; align-items: center; gap: 4px; }
+.meter-icon { font-size: 13px; line-height: 1; color: var(--muted); text-align: center; font-weight: 700; }
+.meter-track { position: relative; height: 10px; border-radius: 5px; background: var(--line); }
+.meter-track::after {
+  content: ''; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 2px; margin-left: -1px;
+  border-radius: 1px; background: var(--good);
+}
+.meter-ok { position: absolute; top: 0; bottom: 0; border-radius: 5px; background: color-mix(in srgb, var(--good) 30%, var(--line)); }
+.meter-dot {
+  position: absolute; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
+  border: 1.5px solid var(--paper); opacity: 0.35; transform: scale(0.8);
+  transition: opacity 400ms, transform 400ms;
+}
+.meter-dot.ok { background: var(--good); }
+.meter-dot.early { background: var(--early); }
+.meter-dot.late { background: var(--late); }
+.meter-dot.last { opacity: 1; transform: scale(1.25); z-index: 1; animation: meter-pop 220ms ease-out; }
+@keyframes meter-pop { from { transform: scale(2.1); } to { transform: scale(1.25); } }
+.meter-legend { display: flex; justify-content: space-between; padding-left: 20px; font-size: 11.5px; font-weight: 600; line-height: 1; }
+.meter-legend .early { color: var(--early); }
+.meter-legend .late { color: var(--late); }
+.timing-key { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.9rem; margin: 6px 0 2px; }
+.timing-key span::before { content: ''; display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+.timing-key .k-ok::before { background: var(--good); }
+.timing-key .k-early::before { background: var(--early); }
+.timing-key .k-late::before { background: var(--late); }
 .ear-sheet { width: 100%; max-width: 560px; height: 150px; }
 .ear-sheet canvas { width: 100%; height: 150px; display: block; border-radius: 10px; }
 .ear-names { font-weight: 600; letter-spacing: 0.04em; min-height: 1.4em; }
