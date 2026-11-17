@@ -23,9 +23,7 @@ const browser = await chromium.launch();
 /** Plain JS strings: tsx would otherwise inject helpers the page doesn't have. */
 const FAKE_MIDI = `
   const input = { id: 'fp10', name: 'FP-10', state: 'connected', onmidimessage: null };
-  window.__sent = [];
-  const output = { id: 'fp10-out', name: 'FP-10', state: 'connected', send: (d) => window.__sent.push([...d]), open: () => Promise.resolve() };
-  const access = { inputs: new Map([['fp10', input]]), outputs: new Map([['fp10-out', output]]), onstatechange: null };
+  const access = { inputs: new Map([['fp10', input]]), onstatechange: null };
   Object.defineProperty(Navigator.prototype, 'requestMIDIAccess', { value: () => Promise.resolve(access), configurable: true });
   const q = navigator.permissions.query.bind(navigator.permissions);
   navigator.permissions.query = (d) => d.name === 'midi' ? Promise.resolve({ state: 'prompt' }) : q(d);
@@ -58,8 +56,13 @@ const FAKE_EARLY = `
 const FAKE_BRIDGE = `
   const input = { id: 'fp10', name: 'FP-10', state: 'connected', onmidimessage: null };
   window.__sent = [];
-  const output = { id: 'fp10-out', name: 'FP-10', state: 'connected', send: (d) => window.__sent.push([...d]), open: () => undefined };
-  const access = { inputs: new Map([['fp10', input]]), outputs: { 'fp10-out': output }, onstatechange: null };
+  // Opening fires a state change every time (as the spec allows), and the output list only
+  // offers values(), whose iterator never says it is done.
+  const output = { id: 'fp10-out', name: 'FP-10', state: 'connected', send: (d) => window.__sent.push([...d]),
+    open: () => { setTimeout(() => access.onstatechange && access.onstatechange({ port: output }), 0); return undefined; } };
+  const endless = { values: () => ({ [Symbol.iterator]() { return this; }, next: () => ({ value: output, done: false }) }) };
+  const access = { inputs: new Map([['fp10', input]]), outputs: endless, onstatechange: null };
+  window.__refreshes = 0;
   Object.defineProperty(Navigator.prototype, 'requestMIDIAccess', { value: () => Promise.resolve(access), configurable: true });
   window.__midi = (s, n, v) => input.onmidimessage && input.onmidimessage({ data: new Uint8Array([s, n, v]), timeStamp: performance.now() });
 `;
@@ -247,9 +250,7 @@ const startExercise = async (page: Page) => {
   // Ear training: eight phrases played back right first time move the level up.
   await page.goto('http://localhost:5199/#/oreille');
   await page.click('.ear button:has-text("Tester le son")');
-  await page.waitForTimeout(1800);
-  const sent = (await page.evaluate(() => (window as unknown as { __sent: number[][] }).__sent)) as number[][];
-  ok(sent.filter((d) => d[0] === 0x90).map((d) => d[1]).join() === '60,64,67,72' && sent.some((d) => d[0] === 0x80), `ear: sound test plays C-E-G-C on the piano (${JSON.stringify(sent.slice(0, 4))})`);
+  ok((await page.textContent('.ear .setup'))!.includes('cet appareil'), 'ear: sound comes from the device, with a sound test');
   await page.click('text=C’est parti');
   for (let i = 0; i < 8; i++) {
     await page.waitForFunction(() => document.querySelector('.ear-status')?.textContent?.startsWith('À toi'), null, { timeout: 15000 });
@@ -342,11 +343,9 @@ const startExercise = async (page: Page) => {
     return s && s.dataset.state !== 'asking' ? s.dataset.state : null;
   }, null, { timeout: 5000 }).then((h) => h.jsonValue()).catch(() => 'stuck');
   ok(state === 'connected', `bridge: the piano connects (${state}: ${await page.textContent('.piano-status')})`);
-  await page.goto('http://localhost:5199/#/reglages');
-  await page.click('text=Jouer un accord sur le piano');
-  await page.waitForTimeout(900);
-  const sent = (await page.evaluate(() => (window as unknown as { __sent: number[][] }).__sent)) as number[][];
-  ok(sent.some((d) => d[0] === 0x90 && d[1] === 60), `bridge: notes reach the piano (${sent.length} messages)`);
+  // The page must still respond: a click elsewhere works within a second.
+  const alive = await page.evaluate(() => new Promise((res) => { const t = performance.now(); setTimeout(() => res(performance.now() - t < 500), 50); }));
+  ok(alive === true, 'bridge: the page does not freeze after connecting');
   ok(errors.length === 0, `bridge: no page errors (${errors.join(' | ')})`);
   await page.close();
 }

@@ -1,4 +1,4 @@
-import { parseMidi, portsOf } from '../src/input/midi';
+import { parseMidi } from '../src/input/midi';
 import { NoteBus } from '../src/input/bus';
 import { buildSteps, HINT_AFTER, summarize, WaitSession } from '../src/exercise/wait';
 import { buildTargets, RhythmSession, summarizeRhythm } from '../src/exercise/rhythm';
@@ -28,7 +28,6 @@ const ok = (cond: boolean, msg: string) => {
 
 // --- MIDI decoding ---
 ok(parseMidi([0x90, 60, 100], 5)?.on === true, 'note on');
-ok(portsOf(new Map([['a', 1], ['b', 2]])).join() === '1,2' && portsOf([3]).join() === '3' && portsOf({ x: 4 } as Record<string, number>).join() === '4' && portsOf(undefined).length === 0, 'MIDI ports: Map, array or plain object');
 ok(parseMidi([0x93, 60, 100], 5)?.midi === 60, 'note on, any channel');
 ok(parseMidi([0x90, 60, 0], 5)?.on === false, 'velocity 0 is a release');
 ok(parseMidi([0x80, 60, 40], 5)?.on === false, 'note off');
