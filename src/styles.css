@@ -376,3 +376,33 @@ button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent);
 .hand-facts { grid-column: 2; display: flex; flex-wrap: wrap; gap: 6px; }
 .hand-chip { font-size: 0.82rem; padding: 2px 8px; border-radius: 999px; background: var(--line); }
 .hand-chip.good { background: color-mix(in srgb, var(--good) 22%, var(--line)); }
+
+/* ---------- Home ---------- */
+.home .streak { font-size: 1rem; }
+.home-head { align-items: center; }
+.today { margin-bottom: 16px; }
+.plan-steps { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; counter-reset: step; }
+.step {
+  display: flex; align-items: center; gap: 6px; padding: 5px 10px 5px 8px; border-radius: 999px;
+  background: color-mix(in srgb, var(--line) 70%, transparent); font-size: 0.86rem; max-width: 100%;
+}
+.step-icon { flex: none; }
+.step-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.today .btn.big { width: 100%; }
+.today .piano-status { margin: 12px 0 0; border: none; background: none; padding: 0; }
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 520px) { .tiles { gap: 10px; } .tile { padding: 12px; min-height: 104px; } .tile-line { font-size: 0.84rem; } }
+@media (max-width: 340px) { .tiles { grid-template-columns: 1fr; } }
+.tile {
+  display: flex; flex-direction: column; align-items: stretch; gap: 8px; text-align: left;
+  background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px;
+  color: var(--ink); font: inherit; cursor: pointer; box-shadow: var(--shadow); min-height: 118px;
+}
+.tile:active { transform: scale(0.99); }
+.tile-head { display: flex; align-items: center; gap: 8px; }
+.tile-icon { font-size: 1.35rem; }
+.tile-title { font-weight: 650; font-size: 1.05rem; }
+.tile-line { color: var(--muted); font-size: 0.9rem; line-height: 1.35; flex: 1; }
+.tile-bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.tile-bar > span { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.home .links { margin-top: 20px; gap: 6px; }

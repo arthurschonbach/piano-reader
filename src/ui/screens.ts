@@ -1,4 +1,5 @@
 /** Guided session, level test, piece page, progress, settings. */
+import { weakNotesLine } from './home';
 import type { ThemeChoice } from '../core/settings';
 import { blockPasses, dailyPlan, placementLessons, type Activity } from '../curriculum/coach';
 import { concatScores, generateExercise } from '../curriculum/generate';
@@ -226,6 +227,9 @@ export function renderProgress(root: HTMLElement, app: App): () => void {
     totals.append(el);
   }
   page.append(totals);
+
+  const weak = weakNotesLine(app);
+  if (weak) page.append(h('h2', 'sect', 'Notes à travailler'), h('p', 'weak', weak));
 
   // Last 28 days.
   page.append(h('h2', 'sect', '4 dernières semaines'));

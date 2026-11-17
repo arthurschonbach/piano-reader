@@ -1,13 +1,12 @@
-import { currentLesson, currentPiece, dailyPlan, duePieces, lessonDone } from '../curriculum/coach';
+import { currentLesson, currentPiece, dailyPlan, lessonDone, type Activity } from '../curriculum/coach';
 import { LESSONS, MASTERY } from '../curriculum/lessons';
-import { PIECES } from '../curriculum/pieces';
+import { PIECE_STAGES, PIECES } from '../curriculum/pieces';
 import { DRILLS } from '../curriculum/technique';
 import { EAR_LEVELS } from '../curriculum/ear';
-import { pieceRow } from './library';
 import type { MidiStatus } from '../input/midi';
 import { practisedToday, streak, validatedDays, weakestNotes } from '../progress/store';
 import type { App } from './app';
-import { button, h, navDock, percent, themeButton } from './dom';
+import { button, h, navDock, percent, themeButton, topBar } from './dom';
 import { nameOf } from './player';
 
 function pianoStatus(app: App, s: MidiStatus, el: HTMLElement): void {
@@ -32,35 +31,42 @@ function pianoStatus(app: App, s: MidiStatus, el: HTMLElement): void {
       break;
     case 'ready':
       text.textContent = s.devices.length
-        ? `${s.devices.join(', ')} connecté · joue une note pour tester`
+        ? `${s.devices.join(', ')} connecté`
         : 'Aucun piano détecté : vérifie le Bluetooth ou le câble. Clavier à l’écran en attendant.';
       break;
   }
 }
 
+/** One glyph per kind of activity, so the day's plan reads at a glance. */
+const ICON: Record<Activity['kind'], string> = {
+  flash: '⚡', technique: '🎹', sight: '👀', lesson: '📘', loop: '🔁', piece: '🎼', ear: '👂'
+};
+
+/** A big tappable tile: what it is, where you are, how far along. */
+function tile(icon: string, title: string, line: string, progress: number, go: () => void, cls = ''): HTMLElement {
+  const t = button('', `tile ${cls}`, go);
+  const head = h('div', 'tile-head');
+  head.append(h('span', 'tile-icon', icon), h('span', 'tile-title', title));
+  const bar = h('div', 'tile-bar');
+  const fill = h('span');
+  fill.style.width = `${Math.round(Math.max(0, Math.min(1, progress)) * 100)}%`;
+  bar.append(fill);
+  t.append(head, h('div', 'tile-line', line), bar);
+  return t;
+}
+
 export function renderHome(root: HTMLElement, app: App): () => void {
   const p = app.progress;
-  const page = h('div', 'page');
+  const page = h('div', 'page home');
 
+  // Nothing to tap up here: in full screen the iPad's top strip swallows taps.
   const head = h('header', 'home-head');
-  const titles = h('div');
-  titles.append(h('h1', 'title', 'Piano Reader'), h('p', 'sub', 'Ton coach de piano, à ton rythme.'));
+  head.append(h('h1', 'title', 'Piano Reader'));
+  const s = streak(p);
+  if (s) head.append(h('span', 'streak', `🔥 ${s} jour${s > 1 ? 's' : ''}`));
   const gear = button('⚙︎', 'btn icon', () => app.go('#/reglages'));
   gear.setAttribute('aria-label', 'Réglages');
-  head.append(titles);
-  // Bottom-right: the top of the screen doesn't take taps in full screen.
-  page.append(navDock(themeButton(app), gear));
-  page.append(head);
-
-  const status = h('div', 'piano-status');
-  const drawStatus = (s: MidiStatus) => pianoStatus(app, s, status);
-  drawStatus(app.midi.status);
-  const offMidi = app.midi.onChange(drawStatus);
-  const offBus = app.bus.on((e) => {
-    const t = status.querySelector('.ps-text');
-    if (t && e.on && app.midi.connected) t.textContent = `${nameOf(e.midi)} ✓ · ${app.midi.status.state === 'ready' ? app.midi.status.devices[0] : ''} connecté`;
-  });
-  page.append(status);
+  page.append(navDock(themeButton(app), gear), head);
 
   // --- First visit: find the right level ---
   if (!p.onboarded) {
@@ -77,23 +83,84 @@ export function renderHome(root: HTMLElement, app: App): () => void {
     page.append(card);
   }
 
-  // --- Today's session ---
+  // --- Today's session: the one big thing to do ---
   const plan = dailyPlan(p);
+  const done = practisedToday(p);
   const today = h('section', 'card today');
-  const s = streak(p);
-  const head2 = h('div', 'today-head');
-  head2.append(h('h2', undefined, practisedToday(p) ? 'Séance du jour ✓' : 'Ta séance du jour'), h('span', 'streak', s ? `🔥 ${s} jour${s > 1 ? 's' : ''}` : ''));
-  today.append(head2);
-  const ol = h('ol', 'plan');
-  for (const a of plan) ol.append(h('li', undefined, a.label));
-  today.append(ol, h('p', 'hint', 'Environ 20 à 25 minutes. Garde le reste de ta séance pour tes propres morceaux.'));
-  today.append(button(practisedToday(p) ? 'Refaire une séance' : 'Commencer la séance', 'btn primary big', () => app.go('#/seance')));
+  today.append(h('h2', undefined, done ? 'Séance du jour ✓' : 'Ta séance du jour'));
+  const steps = h('ol', 'plan-steps');
+  for (const a of plan) {
+    const li = h('li', 'step');
+    li.append(h('span', 'step-icon', ICON[a.kind]), h('span', 'step-label', a.label));
+    steps.append(li);
+  }
+  today.append(steps, button(done ? 'Refaire une séance' : 'Commencer la séance', 'btn primary big', () => app.go('#/seance')));
+  // The piano, right where it's needed: before playing.
+  const status = h('div', 'piano-status');
+  const drawStatus = (st: MidiStatus) => pianoStatus(app, st, status);
+  drawStatus(app.midi.status);
+  const offMidi = app.midi.onChange(drawStatus);
+  const offBus = app.bus.on((e) => {
+    const t = status.querySelector('.ps-text');
+    if (t && e.on && app.midi.connected && app.midi.status.state === 'ready') t.textContent = `${app.midi.status.devices[0]} connecté · ${nameOf(e.midi)} ✓`;
+  });
+  today.append(status);
   page.append(today);
 
-  // --- Path ---
-  page.append(h('h2', 'sect', 'Parcours'));
+  // --- Everything else, one tile each ---
+  const tiles = h('section', 'tiles');
+  const cur = currentLesson(p);
+  const mastered = LESSONS.filter((l) => lessonDone(p, l)).length;
+  const rec = cur ? p.lessons[cur.id] : undefined;
+  const lessonLine = cur
+    ? `Leçon ${cur.number} · ${cur.title}${rec?.sessions.length ? ` · ${validatedDays(rec)}/${MASTERY.days} jours` : ''}`
+    : 'Parcours terminé';
+  tiles.append(tile('📘', 'Parcours', lessonLine, mastered / LESSONS.length, () => app.go('#/parcours'), 'path'));
+  const piece = currentPiece(p);
+  const stage = piece ? p.pieces[piece.id]?.stage ?? 0 : 0;
+  tiles.append(
+    tile(
+      '🎼', 'Morceaux',
+      piece ? `${piece.title} · ${PIECE_STAGES[stage]?.label ?? ''}` : `${PIECES.length} morceaux à choisir`,
+      piece ? stage / PIECE_STAGES.length : 0,
+      () => app.go(piece ? `#/morceau/${piece.id}` : '#/bibliotheque'),
+      'pieces-tile'
+    )
+  );
+  const reached = Object.values(p.technique).filter((r) => r.reached).length;
+  tiles.append(tile('🎹', 'Technique', `${reached} / ${DRILLS.length} au tempo final`, reached / DRILLS.length, () => app.go('#/technique')));
+  tiles.append(
+    tile('👂', 'Oreille', `Niveau ${p.ear.level} · ${EAR_LEVELS[p.ear.level - 1]?.title ?? ''}`, (p.ear.level - 1) / EAR_LEVELS.length, () => app.go('#/oreille'))
+  );
+  page.append(tiles);
+
+  // --- Quiet links ---
+  const links = h('nav', 'links');
+  links.append(
+    button('📈 Mes progrès', 'btn quiet', () => app.go('#/progres')),
+    button('📚 Bibliothèque', 'btn quiet', () => app.go('#/bibliotheque')),
+    button('📖 Lexique FR ↔ EN', 'btn quiet', () => app.go('#/lexique')),
+    button(p.placement ? 'Refaire le test de niveau' : 'Test de niveau', 'btn quiet', () => app.go('#/test'))
+  );
+  page.append(links);
+
+  root.append(page);
+  return () => {
+    offMidi();
+    offBus();
+    page.remove();
+  };
+}
+
+/** The whole path, current lesson in view. */
+export function renderPath(root: HTMLElement, app: App): () => void {
+  const p = app.progress;
+  const view = h('div', 'subpage');
+  view.append(topBar(app, 'Parcours', () => app.go('#/')));
+  const page = h('div', 'page');
   const cur = currentLesson(p);
   const list = h('ol', 'lessons');
+  let curEl: HTMLElement | null = null;
   for (const l of LESSONS) {
     const rec = p.lessons[l.id];
     const done = lessonDone(p, l);
@@ -109,46 +176,20 @@ export function renderHome(root: HTMLElement, app: App): () => void {
     } else st = l === cur ? 'À travailler maintenant' : l.mode === 'rhythm' ? 'En rythme' : 'Lecture';
     meta.append(h('div', 'st', st));
     li.append(h('div', 'num', done ? '✓' : String(l.number)), meta, button(l === cur ? 'Jouer' : 'Ouvrir', l === cur ? 'btn primary' : 'btn', () => app.go(`#/lecon/${l.id}`)));
+    if (l === cur) curEl = li;
     list.append(li);
   }
   page.append(list);
+  view.append(page);
+  root.append(view);
+  // Open on the lesson in progress, not on lesson 1.
+  requestAnimationFrame(() => curEl?.scrollIntoView({ block: 'center' }));
+  return () => view.remove();
+}
 
-  // --- Pieces ---
-  page.append(h('h2', 'sect', 'Morceaux'));
-  const pl = h('ul', 'pieces');
-  const curPiece = currentPiece(p);
-  const shown = new Set<string>();
-  for (const pc of [...(curPiece ? [curPiece] : []), ...duePieces(p)]) {
-    if (shown.has(pc.id)) continue;
-    shown.add(pc.id);
-    pl.append(pieceRow(app, pc));
-  }
-  page.append(pl, button(`📚 Bibliothèque · ${PIECES.length} morceaux`, 'btn wide-btn', () => app.go('#/bibliotheque')));
-
-  // --- Technique ---
-  page.append(h('h2', 'sect', 'Technique et oreille'));
-  const reached = Object.values(p.technique).filter((r) => r.reached).length;
-  page.append(button(`🎹 Gammes, arpèges, accords · ${reached} / ${DRILLS.length} au tempo final`, 'btn wide-btn', () => app.go('#/technique')));
-  page.append(button(`👂 Oreille · niveau ${p.ear.level} / ${EAR_LEVELS.length} · ${EAR_LEVELS[p.ear.level - 1]?.title ?? ''}`, 'btn wide-btn', () => app.go('#/oreille')));
-
-  // --- Footer links ---
-  const weak = weakestNotes(p);
-  if (weak.length) {
-    page.append(h('h2', 'sect', 'À travailler'));
-    page.append(h('p', 'weak', weak.map((w) => `${nameOf(w.midi)} (${percent(w.stat.clean / w.stat.attempts)} juste)`).join(' · ')));
-  }
-  const links = h('div', 'links');
-  links.append(
-    button('Mes progrès', 'btn', () => app.go('#/progres')),
-    button('📖 Lexique FR ↔ EN', 'btn', () => app.go('#/lexique')),
-    button(p.placement ? 'Refaire le test de niveau' : 'Test de niveau', 'btn', () => app.go('#/test'))
-  );
-  page.append(links);
-
-  root.append(page);
-  return () => {
-    offMidi();
-    offBus();
-    page.remove();
-  };
+/** The notes read least well, for the progress page. */
+export function weakNotesLine(app: App): string {
+  return weakestNotes(app.progress)
+    .map((w) => `${nameOf(w.midi)} (${percent(w.stat.clean / w.stat.attempts)} juste)`)
+    .join(' · ');
 }

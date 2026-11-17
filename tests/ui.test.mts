@@ -139,9 +139,13 @@ const startExercise = async (page: Page) => {
   const res = await page.textContent('.results');
   ok(!!res && res.includes('9') && res.includes('leçon 4'), 'level test: all blocks passed, path resumes at lesson 4');
   await page.click('text=Voir ma séance du jour');
-  await page.waitForSelector('.lessons');
-  ok((await page.textContent('.lesson.current .t')) === 'Jouer en rythme', 'current lesson is the rhythm one');
+  await page.waitForSelector('.tiles');
   ok(!(await page.isVisible('.hero')), 'welcome card gone');
+  ok((await page.textContent('.tile.path .tile-line'))!.includes('Jouer en rythme'), 'home: the path tile shows the rhythm lesson');
+  ok(((await page.evaluate(`document.documentElement.scrollHeight`)) as number) < 1300, 'home: about one screen, no long list');
+  await page.click('.tile.path');
+  await page.waitForSelector('.lessons');
+  ok((await page.textContent('.lesson.current .t')) === 'Jouer en rythme', 'path page: current lesson is the rhythm one');
 
   // Rhythm lesson played in time.
   await page.goto('http://localhost:5199/#/lecon/en-rythme');
@@ -309,8 +313,8 @@ const startExercise = async (page: Page) => {
   await page.waitForSelector('text=/ton morceau en cours/');
   ok(true, 'piece chosen as current');
   await page.goto('http://localhost:5199/#/');
-  await page.waitForSelector('.pieces');
-  ok((await page.textContent('.pieces .piece.current .t')) === 'Menuet en sol (Minuet in G)', 'home shows the chosen piece');
+  await page.waitForSelector('.tiles');
+  ok((await page.textContent('.tile.pieces-tile .tile-line'))!.startsWith('Menuet en sol (Minuet in G)'), 'home shows the chosen piece');
   await page.goto('http://localhost:5199/#/lexique');
   await page.waitForSelector('.glossary');
   await page.fill('.search', 'quarter');

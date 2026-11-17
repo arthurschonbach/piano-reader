@@ -5,7 +5,7 @@ import { drillById } from './curriculum/technique';
 import { renderTechnique } from './ui/technique';
 import { renderEar } from './ui/ear';
 import { createApp } from './ui/app';
-import { renderHome } from './ui/home';
+import { renderHome, renderPath } from './ui/home';
 import { renderLibrary, renderPiece } from './ui/library';
 import { renderGlossary } from './ui/glossary';
 import { renderPieceLoop, renderPieceStage, renderPlacement, renderProgress, renderSession, renderSettings } from './ui/screens';
@@ -34,6 +34,8 @@ function route(): void {
     cleanup = playDrill(root, app, drillById(m[1])!, { onExit: () => app.go('#/technique') });
   } else if (hash === '#/oreille') {
     cleanup = renderEar(root, app, { onExit: home, again: () => app.refresh() });
+  } else if (hash === '#/parcours') {
+    cleanup = renderPath(root, app);
   } else if (hash === '#/technique') {
     cleanup = renderTechnique(root, app);
   } else if (hash === '#/bibliotheque') {
